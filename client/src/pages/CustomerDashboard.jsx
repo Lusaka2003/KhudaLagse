@@ -173,10 +173,11 @@ export default function CustomerDashboard() {
 
 				{/* Quick Actions Grid */}
 				<div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-8">
+					
 					<QuickActionCard
 						icon="📦"
 						title="My Orders"
-						color="bg-violet-50 text-violet-500"
+						color="bg-violet-100 text-violet-500"
 						onClick={() => navigate('/my-orders')}
 					/>
 					
@@ -194,6 +195,11 @@ export default function CustomerDashboard() {
 						onClick={() => navigate('/referrals')}
 					/>
 				</div>
+
+				{/* Favorites List */}
+				{showFavorites && (
+					<FavoritesList favorites={favorites} navigate={navigate} />
+				)}
 
 				{/* Main Content Tabs */}
 				<div className="bg-white rounded-2xl shadow-sm border border-stone-200/60 overflow-hidden mb-8">
@@ -233,10 +239,7 @@ export default function CustomerDashboard() {
 					</div>
 				</div>
 
-				{/* Favorites List */}
-				{showFavorites && (
-					<FavoritesList favorites={favorites} navigate={navigate} />
-				)}
+				
 
 				{/* Account Info */}
 				<AccountInfo user={user} onUserUpdate={handleUserUpdate} />
@@ -248,20 +251,38 @@ export default function CustomerDashboard() {
 // ------------------ Components ------------------
 
 const QuickActionCard = ({ icon, title, color, onClick, active }) => (
-	<button
-		onClick={onClick}
-		className={`flex items-center gap-3 p-4 rounded-xl border transition hover:shadow-md ${
-			active 
-				? 'bg-violet-50 border-violet-200 shadow-sm' 
-				: 'bg-white border-stone-200/60 hover:border-stone-300'
-		}`}
-	>
-		<div className={`w-10 h-10 rounded-lg flex items-center justify-center ${color}`}>
-			<span className="text-xl">{icon}</span>
-		</div>
-		<span className="font-medium text-stone-600">{title}</span>
-	</button>
+  <button
+    onClick={onClick}
+    className={`relative flex items-center gap-3 p-4 rounded-xl border overflow-hidden transition hover:shadow-md ${
+      active
+        ? "border-violet-300 shadow-sm"
+        : "border-stone-200/60 hover:border-stone-300"
+    }`}
+    style={{
+      backgroundImage: `url(/bg4.jpg)` ,
+      backgroundSize: "cover",
+      backgroundPosition: "center",
+    }}
+  >
+    {/* Background overlay */}
+    <div
+      className={`absolute inset-0 ${
+        active ? "bg-white/10" : "bg-white/70"
+      }`}
+    ></div>
+
+    {/* Content */}
+    <div className="relative flex items-center gap-3">
+      <div
+        className={`w-10 h-10 rounded-lg flex items-center justify-center ${color}`}
+      >
+        <span className="text-xl">{icon}</span>
+      </div>
+      <span className="font-medium text-stone-700">{title}</span>
+    </div>
+  </button>
 );
+
 
 const FavoritesList = ({ favorites, navigate }) => (
 	<div className="bg-white rounded-2xl shadow-sm border border-stone-200/60 p-6 mb-8">
@@ -312,10 +333,7 @@ const FavoritesList = ({ favorites, navigate }) => (
 const AccountInfo = ({ user, onUserUpdate }) => {
 	const [isEditing, setIsEditing] = useState(false);
 	const [editForm, setEditForm] = useState({
-		name: user?.name || '',
-		email: user?.email || '',
-		phone: user?.phone || '',
-		address: user?.address || {
+		address: {
 			house: '',
 			road: '',
 			area: '',
@@ -328,9 +346,6 @@ const AccountInfo = ({ user, onUserUpdate }) => {
 	// Update form when user prop changes
 	useEffect(() => {
 		setEditForm({
-			name: user?.name || '',
-			email: user?.email || '',
-			phone: user?.phone || '',
 			address: user?.address || {
 				house: '',
 				road: '',
@@ -351,11 +366,6 @@ const AccountInfo = ({ user, onUserUpdate }) => {
 					[addressField]: value,
 				},
 			}));
-		} else {
-			setEditForm((prev) => ({
-				...prev,
-				[name]: value,
-			}));
 		}
 	};
 
@@ -365,18 +375,15 @@ const AccountInfo = ({ user, onUserUpdate }) => {
 
 		try {
 			const response = await axiosInstance.put('/api/auth/profile', {
-				name: editForm.name,
-				email: editForm.email,
-				phone: editForm.phone,
 				address: editForm.address,
+				// Only send address, not other fields
 			});
 
 			if (response.data.success) {
 				// Update user data in localStorage
 				const updatedUser = {
 					...user,
-					...response.data.data.user,
-					id: response.data.data.user.id, // Ensure ID is preserved
+					address: editForm.address,
 				};
 				localStorage.setItem('user', JSON.stringify(updatedUser));
 
@@ -387,13 +394,14 @@ const AccountInfo = ({ user, onUserUpdate }) => {
 
 				// Exit edit mode
 				setIsEditing(false);
+				alert('Address updated successfully!');
 			} else {
-				setError(response.data.message || 'Failed to update profile');
+				setError(response.data.message || 'Failed to update address');
 			}
 		} catch (err) {
 			setError(
 				err.response?.data?.message ||
-					'An error occurred while updating profile'
+					'An error occurred while updating address'
 			);
 		} finally {
 			setLoading(false);
@@ -402,9 +410,6 @@ const AccountInfo = ({ user, onUserUpdate }) => {
 
 	const handleCancel = () => {
 		setEditForm({
-			name: user?.name || '',
-			email: user?.email || '',
-			phone: user?.phone || '',
 			address: user?.address || {
 				house: '',
 				road: '',
@@ -434,7 +439,7 @@ const AccountInfo = ({ user, onUserUpdate }) => {
 			<div className="bg-white rounded-2xl shadow-sm border border-stone-200/60 p-6">
 				<div className="flex justify-between items-center mb-6">
 					<h2 className="text-xl font-bold text-stone-800">
-						Edit Account
+						Edit Delivery Address
 					</h2>
 					<button
 						onClick={() => setIsEditing(false)}
@@ -450,49 +455,14 @@ const AccountInfo = ({ user, onUserUpdate }) => {
 					</div>
 				)}
 
+				<p className="text-sm text-stone-500 mb-6">
+					Update your delivery address. Other account information cannot be changed here.
+				</p>
+
 				<div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 					<div>
 						<label className="block text-sm font-medium text-stone-500 mb-1.5">
-							Full Name
-						</label>
-						<input
-							type="text"
-							name="name"
-							value={editForm.name}
-							onChange={handleInputChange}
-							className="w-full rounded-lg border border-stone-300 px-4 py-2.5 transition focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 focus:outline-none"
-						/>
-					</div>
-
-					<div>
-						<label className="block text-sm font-medium text-stone-500 mb-1.5">
-							Email Address
-						</label>
-						<input
-							type="email"
-							name="email"
-							value={editForm.email}
-							onChange={handleInputChange}
-							className="w-full rounded-lg border border-stone-300 px-4 py-2.5 transition focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 focus:outline-none"
-						/>
-					</div>
-
-					<div>
-						<label className="block text-sm font-medium text-stone-500 mb-1.5">
-							Phone Number
-						</label>
-						<input
-							type="tel"
-							name="phone"
-							value={editForm.phone}
-							onChange={handleInputChange}
-							className="w-full rounded-lg border border-stone-300 px-4 py-2.5 transition focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 focus:outline-none"
-						/>
-					</div>
-
-					<div>
-						<label className="block text-sm font-medium text-stone-500 mb-1.5">
-							House Number
+							House/Apartment Number
 						</label>
 						<input
 							type="text"
@@ -500,6 +470,7 @@ const AccountInfo = ({ user, onUserUpdate }) => {
 							value={editForm.address.house}
 							onChange={handleInputChange}
 							className="w-full rounded-lg border border-stone-300 px-4 py-2.5 transition focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 focus:outline-none"
+							placeholder="e.g., 123, Apt 4B"
 						/>
 					</div>
 
@@ -513,6 +484,7 @@ const AccountInfo = ({ user, onUserUpdate }) => {
 							value={editForm.address.road}
 							onChange={handleInputChange}
 							className="w-full rounded-lg border border-stone-300 px-4 py-2.5 transition focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 focus:outline-none"
+							placeholder="e.g., Main Street"
 						/>
 					</div>
 
@@ -526,6 +498,7 @@ const AccountInfo = ({ user, onUserUpdate }) => {
 							value={editForm.address.area}
 							onChange={handleInputChange}
 							className="w-full rounded-lg border border-stone-300 px-4 py-2.5 transition focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 focus:outline-none"
+							placeholder="e.g., Banani"
 						/>
 					</div>
 
@@ -539,6 +512,7 @@ const AccountInfo = ({ user, onUserUpdate }) => {
 							value={editForm.address.city}
 							onChange={handleInputChange}
 							className="w-full rounded-lg border border-stone-300 px-4 py-2.5 transition focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 focus:outline-none"
+							placeholder="e.g., Dhaka"
 						/>
 					</div>
 				</div>
@@ -549,7 +523,7 @@ const AccountInfo = ({ user, onUserUpdate }) => {
 						disabled={loading}
 						className="flex-1 bg-violet-500 text-white py-2.5 rounded-lg font-semibold hover:bg-violet-600 disabled:opacity-50 transition"
 					>
-						{loading ? 'Saving...' : 'Save Changes'}
+						{loading ? 'Saving...' : 'Save Address'}
 					</button>
 					<button
 						onClick={handleCancel}
@@ -564,26 +538,39 @@ const AccountInfo = ({ user, onUserUpdate }) => {
 	}
 
 	return (
-		<div className="bg-white rounded-2xl shadow-sm border border-stone-200/60 p-6">
-			<div className="flex justify-between items-center mb-6">
-				<h2 className="text-xl font-bold text-stone-800 flex items-center gap-2">
-					<span className="text-stone-400">👤</span>
-					Account Information
-				</h2>
-				<button
-					onClick={() => setIsEditing(true)}
-					className="bg-violet-500 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-violet-600 transition"
-				>
-					Edit
-				</button>
-			</div>
-			<div className="grid grid-cols-1 md:grid-cols-2 gap-y-4 gap-x-8">
-				<InfoRow label="Name" value={user?.name} />
-				<InfoRow label="Email" value={user?.email} />
-				<InfoRow label="Phone" value={user?.phone} />
-				<InfoRow label="Role" value={user?.role} capitalize />
-				<div className="md:col-span-2">
-					<InfoRow label="Address" value={formatAddress(user?.address)} />
+		<div
+			className="relative bg-white rounded-2xl shadow-sm border border-stone-200/60 p-6 overflow-hidden"
+			style={{
+				backgroundImage: "url('/purplebg.jpg')",
+				backgroundSize: "cover",
+				backgroundPosition: "center",
+			}}
+		>
+			{/* Overlay for readability */}
+			<div className="absolute inset-0 bg-white/70 rounded-2xl"></div>
+
+			{/* Content */}
+			<div className="relative">
+				<div className="flex justify-between items-center mb-6">
+					<h2 className="text-xl font-bold text-stone-800 flex items-center gap-2">
+						<span className="text-stone-400">👤</span>
+						Account Information
+					</h2>
+					<button
+						onClick={() => setIsEditing(true)}
+						className="bg-violet-500 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-violet-600 transition"
+					>
+						Edit Address
+					</button>
+				</div>
+				<div className="grid grid-cols-1 md:grid-cols-2 gap-y-4 gap-x-8">
+					<InfoRow label="Name" value={user?.name} />
+					<InfoRow label="Email" value={user?.email} />
+					<InfoRow label="Phone" value={user?.phone} />
+					<InfoRow label="Role" value={user?.role} capitalize />
+					<div className="md:col-span-2">
+						<InfoRow label="Delivery Address" value={formatAddress(user?.address)} />
+					</div>
 				</div>
 			</div>
 		</div>

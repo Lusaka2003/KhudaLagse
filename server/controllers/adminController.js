@@ -188,6 +188,42 @@ export const updateUser = async (req, res) => {
 	}
 };
 
+export const deleteUser = async (req, res) => {
+	try {
+		const { id } = req.params;
+
+		const target = await User.findById(id).select('role isSuperAdmin');
+		if (!target) {
+			return res.status(404).json({ success: false, message: 'User not found.' });
+		}
+
+		// Prevent deletion of super admin
+		if (target.isSuperAdmin === true) {
+			return res.status(403).json({ 
+				success: false, 
+				message: 'Cannot delete super admin account.' 
+			});
+		}
+
+		// Prevent deletion of admin accounts
+		if (target.role === 'admin') {
+			return res.status(403).json({ 
+				success: false, 
+				message: 'Cannot delete admin accounts.' 
+			});
+		}
+
+		await User.findByIdAndDelete(id);
+
+		return res.status(200).json({ 
+			success: true, 
+			message: 'User deleted successfully.' 
+		});
+	} catch (error) {
+		return res.status(500).json({ success: false, message: error.message });
+	}
+};
+
 export const listOrders = async (req, res) => {
 	try {
 		const { status, page = 1, limit = 20 } = req.query;

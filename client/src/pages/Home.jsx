@@ -49,7 +49,7 @@ export default function Home() {
 									Order now
 								</button>
 								<button
-									onClick={() => navigate('/about')}
+									onClick={() => navigate('/plans')}
 									className="rounded-lg border border-white bg-gray-500 backdrop-blur-sm px-8 py-3 text-sm font-semibold text-white transition hover:bg-gray-600"
 								>
 									View plans

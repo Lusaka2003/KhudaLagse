@@ -152,7 +152,7 @@ export default function Restaurants() {
         {user && (
           <div className="mb-12">
             {/* Welcome / Title */}
-            <div className="bg-gradient-to-r from-violet-700 to-teal-600 rounded-2xl p-8 text-white shadow-lg flex flex-col justify-center text-center md:text-left">
+            <div className="bg-gradient-to-r from-violet-700 to-violet-600 rounded-2xl p-8 text-white shadow-lg flex flex-col justify-center text-center md:text-left">
               <h1 className="text-4xl font-bold mb-2">Discover Food</h1>
               <p className="text-violet-100 text-lg">Find your next favorite meal from our curated kitchens.</p>
             </div>

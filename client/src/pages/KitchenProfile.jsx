@@ -6,12 +6,16 @@ import {
 	FaStar,
 	FaTruck,
 	FaChevronDown,
+	FaCalendarDay,
+	FaCalendarWeek,
+	FaCalendar,
+	FaClock,
+	FaExclamationTriangle,
 } from 'react-icons/fa';
 import FloatingCart from '../components/FloatingCart';
 import SubscriptionManager from '../components/SubscriptionManager';
 
-const FALLBACK_IMAGE =
-	'https://images.pexels.com/photos/1640777/pexels-photo-1640777.jpeg?auto=compress&cs=tinysrgb&w=800';
+const FALLBACK_IMAGE = '/bgrnd.webp';
 const DAYS = [
 	'sunday',
 	'monday',
@@ -21,6 +25,99 @@ const DAYS = [
 	'friday',
 	'saturday',
 ];
+
+// Time restrictions
+const ORDER_DEADLINES = {
+	lunch: {
+		hour: 10,
+		minute: 0,
+		label: '10:00 AM'
+	},
+	dinner: {
+		hour: 16,
+		minute: 0,
+		label: '4:00 PM'
+	}
+};
+
+// Helper function to check if ordering is allowed for a meal type
+const canOrderMeal = (mealType, itemDate = null) => {
+	const now = new Date();
+	const deadline = ORDER_DEADLINES[mealType];
+	
+	if (!deadline) return true; // No restriction for unknown meal types
+	
+	// Create deadline time for today
+	const deadlineTime = new Date();
+	deadlineTime.setHours(deadline.hour, deadline.minute, 0, 0);
+	
+	// If itemDate is provided, check if it's for today
+	if (itemDate) {
+		const today = new Date();
+		today.setHours(0, 0, 0, 0);
+		
+		const itemDateObj = new Date(itemDate);
+		itemDateObj.setHours(0, 0, 0, 0);
+		
+		// If item is not for today, allow ordering (future dates)
+		if (itemDateObj.getTime() !== today.getTime()) {
+			return true;
+		}
+	}
+	
+	// Check if current time is before deadline
+	return now < deadlineTime;
+};
+
+// Helper function to format time remaining
+const getTimeRemainingMessage = (mealType) => {
+	const now = new Date();
+	const deadline = ORDER_DEADLINES[mealType];
+	const deadlineTime = new Date();
+	deadlineTime.setHours(deadline.hour, deadline.minute, 0, 0);
+	
+	if (now >= deadlineTime) {
+		const nextDay = new Date(now);
+		nextDay.setDate(nextDay.getDate() + 1);
+		nextDay.setHours(0, 0, 0, 0);
+		
+		const hoursUntilTomorrow = Math.ceil((nextDay - now) / (1000 * 60 * 60));
+		return `Ordering closed. Opens again in ${hoursUntilTomorrow} hour${hoursUntilTomorrow !== 1 ? 's' : ''}`;
+	}
+	
+	const diffMs = deadlineTime - now;
+	const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+	const diffMinutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+	
+	if (diffHours > 0) {
+		return `Order closes in ${diffHours}h ${diffMinutes}m`;
+	}
+	return `Order closes in ${diffMinutes} minutes`;
+};
+
+// Helper function to get next 30 days
+function getNext30Days() {
+    const days = [];
+    const today = new Date();
+    const todayMs = today.getTime();
+    const dayInMs = 24 * 60 * 60 * 1000;
+    
+    for (let i = 0; i < 30; i++) {
+        const date = new Date(todayMs + (i * dayInMs));
+        days.push({
+            date: date,
+            dateString: date.toISOString().split('T')[0],
+            displayDate: date.toLocaleDateString('en-US', { 
+                weekday: 'short', 
+                month: 'short', 
+                day: 'numeric' 
+            }),
+            dayName: date.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase()
+        });
+    }
+    
+    return days;
+}
 
 export default function KitchenProfile() {
 	const { id } = useParams();
@@ -32,6 +129,7 @@ export default function KitchenProfile() {
 	const [selectedItem, setSelectedItem] = useState(null);
 	const [showItemModal, setShowItemModal] = useState(false);
 	const [user, setUser] = useState(null);
+	const [currentTime, setCurrentTime] = useState(new Date()); // For real-time updates
 	
 	// Reviews state
 	const [reviews, setReviews] = useState([]);
@@ -44,13 +142,23 @@ export default function KitchenProfile() {
 	// Subscription state
 	const [showSubscription, setShowSubscription] = useState(false);
 
-	// Menu state
+	// Menu view state
+	const [menuView, setMenuView] = useState('today'); // 'today', 'weekly', 'monthly'
 	const [activeDay, setActiveDay] = useState(DAYS[new Date().getDay()]);
 
 	const [cart, setCart] = useState(() => {
 		const saved = localStorage.getItem('cart');
 		return saved ? JSON.parse(saved) : [];
 	});
+
+	// Update current time every minute
+	useEffect(() => {
+		const timer = setInterval(() => {
+			setCurrentTime(new Date());
+		}, 60000); // Update every minute
+		
+		return () => clearInterval(timer);
+	}, []);
 
 	// Check user role
 	useEffect(() => {
@@ -95,66 +203,39 @@ export default function KitchenProfile() {
 	}, [id]);
 
 	const addToCart = (item) => {
-	// Get the current date
-	const today = new Date();
-	const currentDayIndex = today.getDay(); // 0 = Sunday, 1 = Monday, etc.
-	
-	// Get the target day index from the item
-	const targetDayIndex = DAYS.indexOf(item.day.toLowerCase());
-	
-	// Calculate days until the target day
-	let daysUntilTarget = targetDayIndex - currentDayIndex;
-	
-	// If the target day has already passed this week, schedule for next week
-	if (daysUntilTarget < 0) {
-		daysUntilTarget += 7;
-	}
-	
-	// If it's the same day but the meal time has passed, schedule for next week
-	if (daysUntilTarget === 0) {
-		const now = new Date();
-		const mealHour = item.mealType === 'lunch' ? 13 : 20;
-		
-		if (now.getHours() >= mealHour) {
-			daysUntilTarget = 7;
+		// Check if ordering is allowed for this meal type and date
+		if (!canOrderMeal(item.mealType, item.date)) {
+			const deadline = ORDER_DEADLINES[item.mealType];
+			alert(`Sorry! ${item.mealType.charAt(0).toUpperCase() + item.mealType.slice(1)} ordering is closed after ${deadline.label}. Please order in advance for tomorrow.`);
+			return;
 		}
-	}
-	
-	// Create delivery date
-	const deliveryDate = new Date(today);
-	deliveryDate.setDate(today.getDate() + daysUntilTarget);
-	
-	// Set meal time
-	if (item.mealType === 'lunch') {
-		deliveryDate.setHours(13, 0, 0, 0);
-	} else if (item.mealType === 'dinner') {
-		deliveryDate.setHours(20, 0, 0, 0);
-	}
+		
+		// Get the item's date from the menu item
+		const itemDate = new Date(item.date);
+		
+		const itemWithDelivery = {
+			...item,
+			quantity: 1,
+			date: itemDate.toISOString(),
+			deliveryDate: itemDate.toISOString(),
+			restaurant: id,
+			restaurantId: id,
+		};
 
-	const itemWithDelivery = {
-		...item,
-		quantity: 1,
-		date: deliveryDate.toISOString(),
-		deliveryDate: deliveryDate.toISOString(),
-		restaurant: id,
-		restaurantId: id,
+		const exists = cart.some(
+			(ci) =>
+				ci._id === item._id &&
+				ci.date === itemWithDelivery.date &&
+				ci.mealType === item.mealType
+		);
+		
+		if (exists) {
+			return alert(`${item.name} is already in your cart for this time.`);
+		}
+
+		setCart((prev) => [...prev, itemWithDelivery]);
+		alert(`${item.name} added to cart for ${itemDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}!`);
 	};
-
-	const exists = cart.some(
-		(ci) =>
-			ci._id === item._id &&
-			ci.date === itemWithDelivery.date &&
-			ci.mealType === item.mealType &&
-			ci.day === item.day
-	);
-	
-	if (exists) {
-		return alert(`${item.name} is already in your cart for this time.`);
-	}
-
-	setCart((prev) => [...prev, itemWithDelivery]);
-	alert(`${item.name} added to cart for ${deliveryDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}!`);
-};
 
 	const submitReview = async () => {
 		if (!reviewComment.trim()) return alert('Please write a comment');
@@ -166,7 +247,6 @@ export default function KitchenProfile() {
 			});
 			
 			const newReview = data.review;
-			// Update local state: remove any existing review from this user and add the new one
 			setReviews((prev) => [newReview, ...prev.filter(r => r._id !== newReview._id)]);
 			
 			setReviewComment('');
@@ -187,17 +267,60 @@ export default function KitchenProfile() {
 		return parts.length ? parts.join(', ') : 'Address not available';
 	};
 
-	const groupedMenuItems = DAYS.reduce((acc, day) => {
-		acc[day] = {
-			lunch: menuItems.filter(
-				(item) => item.day === day && item.mealType === 'lunch'
-			),
-			dinner: menuItems.filter(
-				(item) => item.day === day && item.mealType === 'dinner'
-			),
-		};
-		return acc;
-	}, {});
+	// Group menu items based on view
+	const getTodayItems = () => {
+		const today = new Date();
+		today.setHours(0, 0, 0, 0);
+		
+		// Format today's date string in local timezone
+		const year = today.getFullYear();
+		const month = String(today.getMonth() + 1).padStart(2, '0');
+		const day = String(today.getDate()).padStart(2, '0');
+		const todayString = `${year}-${month}-${day}`;
+		
+		return menuItems.filter(item => {
+			if (!item.date) return false;
+			
+			const itemDate = new Date(item.date);
+			itemDate.setHours(0, 0, 0, 0);
+			
+			// Format item date in local timezone
+			const itemYear = itemDate.getFullYear();
+			const itemMonth = String(itemDate.getMonth() + 1).padStart(2, '0');
+			const itemDay = String(itemDate.getDate()).padStart(2, '0');
+			const itemDateString = `${itemYear}-${itemMonth}-${itemDay}`;
+			
+			return itemDateString === todayString;
+		});
+	};
+
+	const getWeeklyItems = () => {
+		return DAYS.reduce((acc, day) => {
+			acc[day] = {
+				lunch: menuItems.filter(
+					(item) => item.day === day && item.mealType === 'lunch'
+				),
+				dinner: menuItems.filter(
+					(item) => item.day === day && item.mealType === 'dinner'
+				),
+			};
+			return acc;
+		}, {});
+	};
+
+	const getMonthlyItems = () => {
+		const next30Days = getNext30Days();
+		const itemsByDate = {};
+		
+		next30Days.forEach(day => {
+			itemsByDate[day.dateString] = menuItems.filter(item => {
+				const itemDate = new Date(item.date).toISOString().split('T')[0];
+				return itemDate === day.dateString;
+			});
+		});
+		
+		return { next30Days, itemsByDate };
+	};
 
 	if (loading) return (
 		<div className="min-h-screen flex items-center justify-center pt-20 bg-stone-50">
@@ -246,11 +369,7 @@ export default function KitchenProfile() {
 						</div>
 					</div>
 					
-					{/* Rating Summary Card */}
-					<div className="bg-white/10 backdrop-blur-md rounded-2xl p-5 border border-white/10 text-white min-w-[220px] shadow-2xl">
-						<div className="text-4xl font-bold mb-1">{reviews.length}</div>
-						<div className="text-sm font-medium text-violet-300 uppercase tracking-wider">Happy Customers</div>
-					</div>
+					
 				</div>
 			</div>
 
@@ -262,6 +381,47 @@ export default function KitchenProfile() {
 					<p className="text-stone-700 leading-relaxed text-xl font-light">
 						{kitchen.about || "Welcome to our kitchen! We prepare fresh, healthy, and delicious home-cooked meals daily. Using only the finest ingredients, we ensure every bite feels like home."}
 					</p>
+				</div>
+
+				{/* Order Deadline Banner */}
+				<div className="mb-8 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-2xl p-5 shadow-sm">
+					<div className="flex items-center gap-3 mb-3">
+						<div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center text-amber-600">
+							<FaClock />
+						</div>
+						<div>
+							<h3 className="font-bold text-amber-900">Order Deadlines</h3>
+							<p className="text-sm text-amber-700">Order in advance to ensure availability</p>
+						</div>
+					</div>
+					<div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+						<div className={`p-3 rounded-lg border ${canOrderMeal('lunch') ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50'}`}>
+							<div className="flex justify-between items-center">
+								<span className="font-semibold text-stone-800">Lunch</span>
+								<span className={`text-xs px-2 py-1 rounded-full ${canOrderMeal('lunch') ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+									{canOrderMeal('lunch') ? 'Open' : 'Closed'}
+								</span>
+							</div>
+							<p className="text-sm text-stone-600 mt-1">
+								Closes at {ORDER_DEADLINES.lunch.label}
+								<br />
+								<span className="text-xs font-medium">{getTimeRemainingMessage('lunch')}</span>
+							</p>
+						</div>
+						<div className={`p-3 rounded-lg border ${canOrderMeal('dinner') ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50'}`}>
+							<div className="flex justify-between items-center">
+								<span className="font-semibold text-stone-800">Dinner</span>
+								<span className={`text-xs px-2 py-1 rounded-full ${canOrderMeal('dinner') ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+									{canOrderMeal('dinner') ? 'Open' : 'Closed'}
+								</span>
+							</div>
+							<p className="text-sm text-stone-600 mt-1">
+								Closes at {ORDER_DEADLINES.dinner.label}
+								<br />
+								<span className="text-xs font-medium">{getTimeRemainingMessage('dinner')}</span>
+							</p>
+						</div>
+					</div>
 				</div>
 
 				{/* Reviews & Subscription Layout */}
@@ -289,7 +449,6 @@ export default function KitchenProfile() {
 							</div>
 						</div>
 
-						{/* Review Form */}
 						{showReviewForm && (
 							<div className="bg-white p-4 rounded-xl border border-stone-200 mb-6 shadow-sm">
 								<div className="flex gap-2 mb-3">
@@ -328,7 +487,6 @@ export default function KitchenProfile() {
 							</div>
 						)}
 
-						{/* Recent Reviews List - Grid */}
 						<div className="grid grid-cols-1 md:grid-cols-3 gap-4">
 							{reviews.length === 0 ? (
 								<div className="col-span-full bg-stone-50 rounded-xl p-6 text-center text-stone-500 italic text-sm">
@@ -365,7 +523,7 @@ export default function KitchenProfile() {
 						</div>
 					</div>
 
-					{/* Subscription (Collapsible) - Full Width Below Reviews */}
+					{/* Subscription */}
 					<div>
 						<div className="bg-white rounded-2xl border border-violet-100 shadow-sm overflow-hidden group">
 							<button 
@@ -397,41 +555,109 @@ export default function KitchenProfile() {
 				<div id="menu">
 					<div className="flex items-center justify-center mb-10">
 						<div className="h-px bg-stone-200 w-24"></div>
-						<h2 className="text-3xl font-bold text-stone-800 mx-6 tracking-tight">Weekly Menu</h2>
+						<h2 className="text-3xl font-bold text-stone-800 mx-6 tracking-tight">Menu</h2>
 						<div className="h-px bg-stone-200 w-24"></div>
 					</div>
 
-					{/* Day Tabs */}
+					{/* Menu View Toggle */}
 					<div className="flex justify-center mb-10">
-						<div className="inline-flex bg-stone-100 p-1.5 rounded-full shadow-inner overflow-x-auto max-w-full">
-							{DAYS.map((day) => (
-								<button
-									key={day}
-									onClick={() => setActiveDay(day)}
-									className={`px-6 py-2.5 rounded-full text-sm font-bold capitalize whitespace-nowrap transition-all duration-300 ${
-										activeDay === day
-											? 'bg-white text-violet-700 shadow-md ring-1 ring-black/5'
-											: 'text-stone-500 hover:text-stone-700 hover:bg-stone-200/50'
-									}`}
-								>
-									{day}
-								</button>
-							))}
+						<div className="inline-flex bg-white p-1.5 rounded-2xl shadow-lg border border-stone-100">
+							<button
+								onClick={() => setMenuView('today')}
+								className={`px-6 py-3 rounded-xl text-sm font-bold flex items-center gap-2 transition-all duration-300 ${
+									menuView === 'today'
+										? 'bg-violet-600 text-white shadow-md'
+										: 'text-stone-500 hover:text-stone-700 hover:bg-stone-50'
+								}`}
+							>
+								<FaCalendarDay />
+								Today
+							</button>
+							<button
+								onClick={() => setMenuView('weekly')}
+								className={`px-6 py-3 rounded-xl text-sm font-bold flex items-center gap-2 transition-all duration-300 ${
+									menuView === 'weekly'
+										? 'bg-violet-600 text-white shadow-md'
+										: 'text-stone-500 hover:text-stone-700 hover:bg-stone-50'
+								}`}
+							>
+								<FaCalendarWeek />
+								Weekly
+							</button>
+							<button
+								onClick={() => setMenuView('monthly')}
+								className={`px-6 py-3 rounded-xl text-sm font-bold flex items-center gap-2 transition-all duration-300 ${
+									menuView === 'monthly'
+										? 'bg-violet-600 text-white shadow-md'
+										: 'text-stone-500 hover:text-stone-700 hover:bg-stone-50'
+								}`}
+							>
+								<FaCalendar />
+								Monthly
+							</button>
 						</div>
 					</div>
 
-					{/* Menu Content for Active Day */}
+					{/* Menu Content */}
 					<div className="min-h-[400px]">
-						<DayMenu 
-							day={activeDay}
-							items={groupedMenuItems[activeDay]}
-							openItemModal={(item) => {
-								setSelectedItem(item);
-								setShowItemModal(true);
-							}}
-							addToCart={addToCart}
-							isCustomer={user?.role === 'customer'}
-						/>
+						{menuView === 'today' && (
+							<TodayMenu 
+								items={getTodayItems()}
+								openItemModal={(item) => {
+									setSelectedItem(item);
+									setShowItemModal(true);
+								}}
+								addToCart={addToCart}
+								isCustomer={user?.role === 'customer'}
+								currentTime={currentTime}
+							/>
+						)}
+
+						{menuView === 'weekly' && (
+							<>
+								<div className="flex justify-center mb-8">
+									<div className="inline-flex bg-stone-100 p-1.5 rounded-full shadow-inner overflow-x-auto max-w-full">
+										{DAYS.map((day) => (
+											<button
+												key={day}
+												onClick={() => setActiveDay(day)}
+												className={`px-6 py-2.5 rounded-full text-sm font-bold capitalize whitespace-nowrap transition-all duration-300 ${
+													activeDay === day
+														? 'bg-white text-violet-700 shadow-md ring-1 ring-black/5'
+														: 'text-stone-500 hover:text-stone-700 hover:bg-stone-200/50'
+												}`}
+											>
+												{day}
+											</button>
+										))}
+									</div>
+								</div>
+								<DayMenu 
+									day={activeDay}
+									items={getWeeklyItems()[activeDay]}
+									openItemModal={(item) => {
+										setSelectedItem(item);
+										setShowItemModal(true);
+									}}
+									addToCart={addToCart}
+									isCustomer={user?.role === 'customer'}
+									currentTime={currentTime}
+								/>
+							</>
+						)}
+
+						{menuView === 'monthly' && (
+							<MonthlyMenu 
+								data={getMonthlyItems()}
+								openItemModal={(item) => {
+									setSelectedItem(item);
+									setShowItemModal(true);
+								}}
+								addToCart={addToCart}
+								isCustomer={user?.role === 'customer'}
+								currentTime={currentTime}
+							/>
+						)}
 					</div>
 				</div>
 			</div>
@@ -443,6 +669,7 @@ export default function KitchenProfile() {
 					closeModal={() => setShowItemModal(false)}
 					addToCart={addToCart}
 					isCustomer={user?.role === 'customer'}
+					currentTime={currentTime}
 				/>
 			)}
 
@@ -451,10 +678,115 @@ export default function KitchenProfile() {
 	);
 }
 
-// Day Menu Component
-const DayMenu = ({ day, items, openItemModal, addToCart, isCustomer }) => {
+// Today Menu Component (Updated with time restrictions)
+const TodayMenu = ({ items, openItemModal, addToCart, isCustomer, currentTime }) => {
+	const lunchItems = items.filter(item => item.mealType === 'lunch');
+	const dinnerItems = items.filter(item => item.mealType === 'dinner');
+	
+	// Check if ordering is allowed for today's meals
+	const canOrderLunch = canOrderMeal('lunch');
+	const canOrderDinner = canOrderMeal('dinner');
+
+	if (items.length === 0) {
+		return (
+			<div className="flex flex-col items-center justify-center py-24 bg-white rounded-3xl border border-stone-200 border-dashed mx-4">
+				<div className="w-20 h-20 bg-stone-100 rounded-full flex items-center justify-center text-4xl mb-4 opacity-50">📅</div>
+				<h3 className="text-xl font-bold text-stone-400">No menu for today</h3>
+				<p className="text-stone-400 text-sm mt-1">Check back later or view weekly/monthly menu</p>
+			</div>
+		);
+	}
+
+	return (
+		<div className="space-y-16 animate-in fade-in duration-500">
+			{lunchItems.length > 0 && (
+				<div>
+					<div className="flex items-center gap-4 mb-8">
+						<span className="w-12 h-12 rounded-xl bg-orange-100 text-orange-600 flex items-center justify-center text-2xl shadow-sm">☀️</span>
+						<h3 className="text-2xl font-bold text-stone-800">Lunch</h3>
+						<div className="h-px bg-stone-200 flex-1 ml-4"></div>
+						{!canOrderLunch && (
+							<div className="flex items-center gap-2 px-3 py-1.5 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm font-medium">
+								<FaExclamationTriangle />
+								<span>Ordering closed until tomorrow</span>
+							</div>
+						)}
+					</div>
+					<div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+						{lunchItems.map((item) => (
+							<MenuItemCard
+								key={item._id}
+								item={item}
+								onClick={() => openItemModal(item)}
+								onAdd={() => addToCart(item)}
+								isCustomer={isCustomer}
+								canOrder={canOrderLunch}
+							/>
+						))}
+					</div>
+					{!canOrderLunch && (
+						<div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+							<p className="text-red-700 text-sm font-medium">
+								Lunch ordering is closed after {ORDER_DEADLINES.lunch.label}. 
+								You can still order lunch for future dates.
+							</p>
+						</div>
+					)}
+				</div>
+			)}
+
+			{dinnerItems.length > 0 && (
+				<div>
+					<div className="flex items-center gap-4 mb-8">
+						<span className="w-12 h-12 rounded-xl bg-indigo-100 text-indigo-600 flex items-center justify-center text-2xl shadow-sm">🌙</span>
+						<h3 className="text-2xl font-bold text-stone-800">Dinner</h3>
+						<div className="h-px bg-stone-200 flex-1 ml-4"></div>
+						{!canOrderDinner && (
+							<div className="flex items-center gap-2 px-3 py-1.5 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm font-medium">
+								<FaExclamationTriangle />
+								<span>Ordering closed until tomorrow</span>
+							</div>
+						)}
+					</div>
+					<div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+						{dinnerItems.map((item) => (
+							<MenuItemCard
+								key={item._id}
+								item={item}
+								onClick={() => openItemModal(item)}
+								onAdd={() => addToCart(item)}
+								isCustomer={isCustomer}
+								canOrder={canOrderDinner}
+							/>
+						))}
+					</div>
+					{!canOrderDinner && (
+						<div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+							<p className="text-red-700 text-sm font-medium">
+								Dinner ordering is closed after {ORDER_DEADLINES.dinner.label}. 
+								You can still order dinner for future dates.
+							</p>
+						</div>
+					)}
+				</div>
+			)}
+		</div>
+	);
+};
+
+// Day Menu Component (for Weekly view) - Updated
+const DayMenu = ({ day, items, openItemModal, addToCart, isCustomer, currentTime }) => {
 	const hasLunch = items.lunch.length > 0;
 	const hasDinner = items.dinner.length > 0;
+	
+	// Check if the selected day is today
+	const today = new Date();
+	const todayDayName = DAYS[today.getDay()];
+	const isToday = day === todayDayName;
+	
+	// For today's items, apply time restrictions
+	const canOrderLunch = isToday ? canOrderMeal('lunch') : true;
+	const canOrderDinner = isToday ? canOrderMeal('dinner') : true;
 
 	if (!hasLunch && !hasDinner) {
 		return (
@@ -474,6 +806,12 @@ const DayMenu = ({ day, items, openItemModal, addToCart, isCustomer }) => {
 						<span className="w-12 h-12 rounded-xl bg-orange-100 text-orange-600 flex items-center justify-center text-2xl shadow-sm">☀️</span>
 						<h3 className="text-2xl font-bold text-stone-800">Lunch</h3>
 						<div className="h-px bg-stone-200 flex-1 ml-4"></div>
+						{!canOrderLunch && (
+							<div className="flex items-center gap-2 px-3 py-1.5 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm font-medium">
+								<FaExclamationTriangle />
+								<span>Ordering closed</span>
+							</div>
+						)}
 					</div>
 					<div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 						{items.lunch.map((item) => (
@@ -483,9 +821,18 @@ const DayMenu = ({ day, items, openItemModal, addToCart, isCustomer }) => {
 								onClick={() => openItemModal(item)}
 								onAdd={() => addToCart(item)}
 								isCustomer={isCustomer}
+								canOrder={canOrderLunch}
 							/>
 						))}
 					</div>
+					{isToday && !canOrderLunch && (
+						<div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+							<p className="text-red-700 text-sm font-medium">
+								Today's lunch ordering is closed after {ORDER_DEADLINES.lunch.label}. 
+								You can still order lunch for future days.
+							</p>
+						</div>
+					)}
 				</div>
 			)}
 
@@ -495,6 +842,12 @@ const DayMenu = ({ day, items, openItemModal, addToCart, isCustomer }) => {
 						<span className="w-12 h-12 rounded-xl bg-indigo-100 text-indigo-600 flex items-center justify-center text-2xl shadow-sm">🌙</span>
 						<h3 className="text-2xl font-bold text-stone-800">Dinner</h3>
 						<div className="h-px bg-stone-200 flex-1 ml-4"></div>
+						{!canOrderDinner && (
+							<div className="flex items-center gap-2 px-3 py-1.5 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm font-medium">
+								<FaExclamationTriangle />
+								<span>Ordering closed</span>
+							</div>
+						)}
 					</div>
 					<div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 						{items.dinner.map((item) => (
@@ -504,140 +857,369 @@ const DayMenu = ({ day, items, openItemModal, addToCart, isCustomer }) => {
 								onClick={() => openItemModal(item)}
 								onAdd={() => addToCart(item)}
 								isCustomer={isCustomer}
+								canOrder={canOrderDinner}
 							/>
 						))}
 					</div>
+					{isToday && !canOrderDinner && (
+						<div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+							<p className="text-red-700 text-sm font-medium">
+								Today's dinner ordering is closed after {ORDER_DEADLINES.dinner.label}. 
+								You can still order dinner for future days.
+							</p>
+						</div>
+					)}
 				</div>
 			)}
 		</div>
 	);
 };
 
-// Redesigned Menu Item Card
-const MenuItemCard = ({ item, onClick, onAdd, isCustomer }) => (
-	<div 
-		onClick={onClick}
-		className="bg-white p-4 rounded-2xl border border-stone-100 shadow-sm hover:shadow-xl hover:border-violet-200 transition-all duration-300 cursor-pointer group flex gap-5 h-36 relative overflow-hidden"
-	>
-		<div className="w-28 h-28 shrink-0 rounded-xl overflow-hidden bg-stone-100 relative shadow-inner">
-			<img
-				src={item.imageUrl || FALLBACK_IMAGE}
-				alt={item.name}
-				className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
-				onError={(e) => { e.currentTarget.src = FALLBACK_IMAGE; }}
-			/>
-		</div>
-		
-		<div className="flex-1 flex flex-col justify-between min-w-0 py-1">
-			<div>
-				<div className="flex justify-between items-start mb-1">
-					<h4 className="font-bold text-stone-800 group-hover:text-violet-700 transition line-clamp-1 text-lg">{item.name}</h4>
-					<span className="font-bold text-violet-600 shrink-0 ml-2 bg-violet-50 px-2 py-0.5 rounded-lg">{item.price} ৳</span>
-				</div>
-				<div className="flex flex-wrap gap-1 mb-2">
-					{item.calories && <span className="text-[10px] font-bold text-stone-400 bg-stone-50 px-1.5 py-0.5 rounded uppercase tracking-wide">{item.calories} CAL</span>}
-					<span className="text-[10px] font-bold text-stone-400 bg-stone-50 px-1.5 py-0.5 rounded uppercase tracking-wide">{item.mealType}</span>
-				</div>
-				<p className="text-stone-500 text-sm line-clamp-2 pr-4 leading-relaxed">{item.description}</p>
-			</div>
-		</div>
-		
-		{/* Add Button - Hover Effect */}
-		{isCustomer && (
-			<button
-				onClick={(e) => {
-					e.stopPropagation();
-					onAdd();
-				}}
-				className="absolute bottom-4 right-4 bg-stone-100 text-stone-600 w-10 h-10 rounded-full flex items-center justify-center hover:bg-violet-600 hover:text-white transition-all shadow-sm group-hover:scale-110"
-				title="Add to Cart"
-			>
-				<span className="font-bold text-xl mb-0.5">+</span>
-			</button>
-		)}
-	</div>
-);
+// Monthly Menu Component - Updated
+const MonthlyMenu = ({ data, openItemModal, addToCart, isCustomer, currentTime }) => {
+	const { next30Days, itemsByDate } = data;
 
-// Item Modal
-const ItemModal = ({ item, closeModal, addToCart, isCustomer }) => (
-	<div
-		className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200"
-		onClick={closeModal}
-	>
-		<div
-			className="bg-white rounded-3xl shadow-2xl max-w-lg w-full overflow-hidden animate-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto"
-			onClick={(e) => e.stopPropagation()}
-		>
-			<div className="relative h-72">
-				<img
-					src={item.imageUrl || FALLBACK_IMAGE}
-					alt={item.name}
-					className="w-full h-full object-cover"
-					onError={(e) => { e.currentTarget.src = FALLBACK_IMAGE; }}
-				/>
-				<div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent flex items-end p-8">
-					<div className="w-full">
-						<div className="flex justify-between items-end mb-2">
-							<h3 className="text-3xl font-bold text-white shadow-sm leading-tight">{item.name}</h3>
-							<span className="text-2xl font-bold text-violet-400 shadow-sm bg-black/30 px-3 py-1 rounded-lg backdrop-blur-md">{item.price} ৳</span>
+	return (
+		<div className="space-y-4">
+			{next30Days.map(day => {
+				const dayItems = itemsByDate[day.dateString] || [];
+				const lunchItems = dayItems.filter(item => item.mealType === 'lunch');
+				const dinnerItems = dayItems.filter(item => item.mealType === 'dinner');
+				
+				// Check if this day is today
+				const today = new Date();
+				today.setHours(0, 0, 0, 0);
+				const dayDate = new Date(day.dateString);
+				dayDate.setHours(0, 0, 0, 0);
+				const isToday = dayDate.getTime() === today.getTime();
+				
+				// Apply time restrictions only for today
+				const canOrderLunch = isToday ? canOrderMeal('lunch') : true;
+				const canOrderDinner = isToday ? canOrderMeal('dinner') : true;
+
+				return (
+					<div key={day.dateString} className="bg-white rounded-2xl border border-stone-100 p-6 shadow-sm hover:shadow-md transition">
+						<div className="flex items-center justify-between mb-4">
+							<div>
+								<h3 className="font-bold text-stone-900 text-lg">
+									{day.displayDate}
+									{isToday && <span className="ml-2 text-xs bg-violet-100 text-violet-700 px-2 py-1 rounded-full">Today</span>}
+								</h3>
+								<p className="text-sm text-stone-500 capitalize">{day.dayName}</p>
+							</div>
+							<span className="bg-violet-50 text-violet-700 px-3 py-1 rounded-full text-xs font-bold">
+								{dayItems.length} item{dayItems.length !== 1 ? 's' : ''}
+							</span>
 						</div>
-						<div className="flex items-center gap-3 text-white/90 text-sm font-medium">
-							<span className="capitalize bg-white/20 px-3 py-1 rounded-full backdrop-blur-md border border-white/10">{item.mealType}</span>
-							{item.calories && (
-								<span className="flex items-center gap-1"><span className="text-orange-400">🔥</span> {item.calories} cal</span>
+
+						{dayItems.length === 0 ? (
+							<p className="text-sm text-stone-400 italic py-4">No meals scheduled</p>
+						) : (
+							<div className="space-y-6">
+								{lunchItems.length > 0 && (
+									<div>
+										<div className="flex items-center gap-2 mb-3">
+											<span className="text-lg">☀️</span>
+											<span className="font-semibold text-stone-700">Lunch</span>
+											{isToday && !canOrderLunch && (
+												<span className="text-xs bg-red-100 text-red-700 px-2 py-1 rounded-full">Ordering closed</span>
+											)}
+										</div>
+										<div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+											{lunchItems.map(item => (
+												<div key={item._id} className="flex gap-3 border border-stone-100 rounded-lg p-3 hover:shadow-sm transition cursor-pointer" onClick={() => openItemModal(item)}>
+													<img
+														src={item.imageUrl || FALLBACK_IMAGE}
+														alt={item.name}
+														className="w-16 h-16 object-cover rounded flex-shrink-0"
+														onError={(e) => { e.currentTarget.src = FALLBACK_IMAGE; }}
+													/>
+													<div className="flex-1 min-w-0">
+														<div className="font-medium text-sm truncate">{item.name}</div>
+														<div className="text-xs text-stone-500 line-clamp-1">{item.description}</div>
+														<div className="flex items-center justify-between mt-1">
+															<span className="text-sm font-bold text-violet-700">{item.price} ৳</span>
+															{isCustomer && (
+																<button
+																	onClick={(e) => {
+																		e.stopPropagation();
+																		if (canOrderLunch) {
+																			addToCart(item);
+																		} else {
+																			alert(`Lunch ordering is closed for today after ${ORDER_DEADLINES.lunch.label}. You can order for future dates.`);
+																		}
+																	}}
+																	className={`px-2 py-1 rounded text-xs font-semibold transition ${
+																		canOrderLunch 
+																			? 'bg-violet-100 text-violet-700 hover:bg-violet-200' 
+																			: 'bg-gray-100 text-gray-400 cursor-not-allowed'
+																	}`}
+																	disabled={!canOrderLunch}
+																>
+																	{canOrderLunch ? 'Add' : 'Closed'}
+																</button>
+															)}
+														</div>
+													</div>
+												</div>
+											))}
+										</div>
+									</div>
+								)}
+
+								{dinnerItems.length > 0 && (
+									<div>
+										<div className="flex items-center gap-2 mb-3">
+											<span className="text-lg">🌙</span>
+											<span className="font-semibold text-stone-700">Dinner</span>
+											{isToday && !canOrderDinner && (
+												<span className="text-xs bg-red-100 text-red-700 px-2 py-1 rounded-full">Ordering closed</span>
+											)}
+										</div>
+										<div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+											{dinnerItems.map(item => (
+												<div key={item._id} className="flex gap-3 border border-stone-100 rounded-lg p-3 hover:shadow-sm transition cursor-pointer" onClick={() => openItemModal(item)}>
+													<img
+														src={item.imageUrl || FALLBACK_IMAGE}
+														alt={item.name}
+														className="w-16 h-16 object-cover rounded flex-shrink-0"
+														onError={(e) => { e.currentTarget.src = FALLBACK_IMAGE; }}
+													/>
+													<div className="flex-1 min-w-0">
+														<div className="font-medium text-sm truncate">{item.name}</div>
+														<div className="text-xs text-stone-500 line-clamp-1">{item.description}</div>
+														<div className="flex items-center justify-between mt-1">
+															<span className="text-sm font-bold text-violet-700">{item.price} ৳</span>
+															{isCustomer && (
+																<button
+																	onClick={(e) => {
+																		e.stopPropagation();
+																		if (canOrderDinner) {
+																			addToCart(item);
+																		} else {
+																			alert(`Dinner ordering is closed for today after ${ORDER_DEADLINES.dinner.label}. You can order for future dates.`);
+																		}
+																	}}
+																	className={`px-2 py-1 rounded text-xs font-semibold transition ${
+																		canOrderDinner 
+																			? 'bg-violet-100 text-violet-700 hover:bg-violet-200' 
+																			: 'bg-gray-100 text-gray-400 cursor-not-allowed'
+																	}`}
+																	disabled={!canOrderDinner}
+																>
+																	{canOrderDinner ? 'Add' : 'Closed'}
+																</button>
+															)}
+														</div>
+													</div>
+												</div>
+											))}
+										</div>
+									</div>
+								)}
+							</div>
+						)}
+					</div>
+				);
+			})}
+		</div>
+	);
+};
+
+// Item Card Component (Updated with time restrictions)
+const MenuItemCard = ({ item, isCustomer, onAdd, onClick, canOrder = true }) => {
+	const isOrderable = isCustomer && canOrder;
+
+	return (
+		<div 
+			className={`group bg-white rounded-2xl border border-stone-100 p-6 hover:shadow-lg transition-all cursor-pointer relative overflow-hidden ${
+				!canOrder ? 'opacity-80' : ''
+			}`}
+			onClick={onClick}
+		>
+			<div className="flex gap-4">
+				<div className="w-24 h-24 flex-shrink-0">
+					<img
+						src={item.imageUrl || FALLBACK_IMAGE}
+						alt={item.name}
+						className="w-full h-full object-cover rounded-xl group-hover:scale-105 transition-transform duration-300"
+						onError={(e) => { e.currentTarget.src = FALLBACK_IMAGE; }}
+					/>
+				</div>
+				
+				<div className="flex-1 flex flex-col justify-between min-w-0 py-1">
+					<div>
+						<div className="flex justify-between items-start mb-1">
+							<h4 className="font-bold text-stone-800 group-hover:text-violet-700 transition line-clamp-1 text-lg">{item.name}</h4>
+							<span className="font-bold text-violet-600 shrink-0 ml-2 bg-violet-50 px-2 py-0.5 rounded-lg">{item.price} ৳</span>
+						</div>
+						<div className="flex flex-wrap gap-1 mb-2">
+							{item.calories && <span className="text-[10px] font-bold text-stone-400 bg-stone-50 px-1.5 py-0.5 rounded uppercase tracking-wide">{item.calories} CAL</span>}
+							<span className="text-[10px] font-bold text-stone-400 bg-stone-50 px-1.5 py-0.5 rounded uppercase tracking-wide">{item.mealType}</span>
+							{!canOrder && (
+								<span className="text-[10px] font-bold text-red-400 bg-red-50 px-1.5 py-0.5 rounded uppercase tracking-wide">Closed</span>
+							)}
+						</div>
+						<p className="text-stone-500 text-sm line-clamp-2 pr-4 leading-relaxed">{item.description}</p>
+					</div>
+				</div>
+				
+				{isCustomer && (
+					<button
+						onClick={(e) => {
+							e.stopPropagation();
+							if (canOrder) {
+								onAdd();
+							} else {
+								const deadline = ORDER_DEADLINES[item.mealType];
+								alert(`Sorry! ${item.mealType} ordering is closed after ${deadline.label}. Please order in advance for tomorrow.`);
+							}
+						}}
+						className={`absolute bottom-4 right-4 w-10 h-10 rounded-full flex items-center justify-center transition-all shadow-sm group-hover:scale-110 ${
+							canOrder 
+								? 'bg-stone-100 text-stone-600 hover:bg-violet-600 hover:text-white' 
+								: 'bg-gray-100 text-gray-400 cursor-not-allowed'
+						}`}
+						title={canOrder ? "Add to Cart" : "Ordering closed"}
+						disabled={!canOrder}
+					>
+						<span className="font-bold text-xl mb-0.5">+</span>
+					</button>
+				)}
+			</div>
+			
+			{!canOrder && (
+				<div className="mt-3 pt-3 border-t border-stone-100">
+					<p className="text-xs text-red-500 flex items-center gap-1">
+						<FaExclamationTriangle className="text-xs" />
+						Ordering closed for today's {item.mealType}
+					</p>
+				</div>
+			)}
+		</div>
+	);
+};
+
+// Item Modal Component (Updated with time restrictions)
+const ItemModal = ({ item, isCustomer, addToCart, closeModal, currentTime }) => {
+	if (!item) return null;
+	
+	// Check if ordering is allowed for this item
+	const itemDate = new Date(item.date);
+	const today = new Date();
+	today.setHours(0, 0, 0, 0);
+	itemDate.setHours(0, 0, 0, 0);
+	const isToday = itemDate.getTime() === today.getTime();
+	const canOrder = isToday ? canOrderMeal(item.mealType, item.date) : true;
+
+	return (
+		<div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+			<div className="bg-white rounded-2xl w-full max-w-md overflow-hidden">
+				<div className="relative">
+					<img
+						src={item.imageUrl || FALLBACK_IMAGE}
+						alt={item.name}
+						className="w-full h-64 object-cover"
+						onError={(e) => { e.currentTarget.src = FALLBACK_IMAGE; }}
+					/>
+					<button
+						onClick={closeModal}
+						className="absolute top-4 right-4 w-8 h-8 bg-white/80 rounded-full flex items-center justify-center hover:bg-white"
+					>
+						×
+					</button>
+				</div>
+				
+				<div className="p-8">
+					<div className="mb-6">
+						<div className="flex justify-between items-start mb-2">
+							<h3 className="text-2xl font-bold text-stone-900">{item.name}</h3>
+							<span className="text-2xl font-bold text-violet-700">{item.price} ৳</span>
+						</div>
+						<div className="flex gap-2">
+							{item.calories && <span className="text-xs font-bold text-stone-500 bg-stone-100 px-2 py-1 rounded">{item.calories} CAL</span>}
+							<span className="text-xs font-bold text-stone-500 bg-stone-100 px-2 py-1 rounded capitalize">{item.mealType}</span>
+							{item.day && <span className="text-xs font-bold text-stone-500 bg-stone-100 px-2 py-1 rounded capitalize">{item.day}</span>}
+							{isToday && !canOrder && (
+								<span className="text-xs font-bold text-red-500 bg-red-100 px-2 py-1 rounded">Ordering Closed</span>
 							)}
 						</div>
 					</div>
-				</div>
-				<button
-					onClick={closeModal}
-					className="absolute top-4 right-4 w-10 h-10 bg-black/20 hover:bg-black/40 backdrop-blur-md rounded-full flex items-center justify-center text-white transition-colors border border-white/10"
-				>
-					✕
-				</button>
-			</div>
 
-			<div className="p-8">
-				{item.description && (
-					<div className="mb-8">
-						<h4 className="text-xs font-bold text-stone-400 uppercase tracking-widest mb-3">About this meal</h4>
-						<p className="text-stone-700 leading-relaxed text-lg font-light">{item.description}</p>
-					</div>
-				)}
-
-				{item.ingredients?.length > 0 && (
-					<div className="mb-8">
-						<h4 className="text-xs font-bold text-stone-400 uppercase tracking-widest mb-3">Ingredients</h4>
-						<div className="flex flex-wrap gap-2">
-							{item.ingredients.map((ing, i) => (
-								<span
-									key={i}
-									className="bg-stone-100 text-stone-600 px-3 py-1.5 rounded-lg text-sm font-medium border border-stone-200"
-								>
-									{ing}
-								</span>
-							))}
+					{item.description && (
+						<div className="mb-8">
+							<h4 className="text-xs font-bold text-stone-400 uppercase tracking-widest mb-3">About this meal</h4>
+							<p className="text-stone-700 leading-relaxed text-lg font-light">{item.description}</p>
 						</div>
-					</div>
-				)}
+					)}
 
-				{isCustomer ? (
-					<button
-						onClick={() => {
-							addToCart(item);
-							closeModal();
-						}}
-						className="w-full bg-violet-600 text-white py-4 rounded-xl font-bold text-lg hover:bg-violet-700 hover:shadow-lg hover:shadow-violet-200 transition-all transform hover:-translate-y-0.5 flex items-center justify-center gap-2"
-					>
-						<span>Add to Cart</span>
-						<span className="bg-violet-700/50 px-2 py-0.5 rounded text-sm">{item.price} ৳</span>
-					</button>
-				) : (
-					<div className="w-full bg-stone-100 text-stone-400 py-4 rounded-xl font-bold text-center">
-						Login to Order
-					</div>
-				)}
+					{item.ingredients?.length > 0 && (
+						<div className="mb-8">
+							<h4 className="text-xs font-bold text-stone-400 uppercase tracking-widest mb-3">Ingredients</h4>
+							<div className="flex flex-wrap gap-2">
+								{item.ingredients.map((ing, i) => (
+									<span
+										key={i}
+										className="bg-stone-100 text-stone-600 px-3 py-1.5 rounded-lg text-sm font-medium border border-stone-200"
+									>
+										{ing}
+									</span>
+								))}
+							</div>
+						</div>
+					)}
+
+					{isToday && !canOrder && (
+						<div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
+							<div className="flex items-center gap-2 text-red-700 font-medium mb-2">
+								<FaExclamationTriangle />
+								<span>Ordering Closed</span>
+							</div>
+							<p className="text-red-600 text-sm">
+								{item.mealType.charAt(0).toUpperCase() + item.mealType.slice(1)} ordering is closed after {ORDER_DEADLINES[item.mealType].label} for today.
+								You can still order this meal for future dates.
+							</p>
+						</div>
+					)}
+
+					{isCustomer ? (
+						<button
+							onClick={() => {
+								if (canOrder) {
+									addToCart(item);
+									closeModal();
+								} else {
+									alert(`Sorry! ${item.mealType} ordering is closed for today after ${ORDER_DEADLINES[item.mealType].label}. You can order for future dates.`);
+								}
+							}}
+							className={`w-full py-4 rounded-xl font-bold text-lg transition-all transform hover:-translate-y-0.5 flex items-center justify-center gap-2 ${
+								canOrder 
+									? 'bg-violet-600 text-white hover:bg-violet-700 hover:shadow-lg hover:shadow-violet-200' 
+									: 'bg-gray-300 text-gray-500 cursor-not-allowed'
+							}`}
+							disabled={!canOrder}
+						>
+							<span>{canOrder ? 'Add to Cart' : 'Ordering Closed'}</span>
+							<span className={`px-2 py-0.5 rounded text-sm ${
+								canOrder ? 'bg-violet-700/50' : 'bg-gray-400'
+							}`}>{item.price} ৳</span>
+						</button>
+					) : (
+						<div className="w-full bg-stone-100 text-stone-400 py-4 rounded-xl font-bold text-center">
+							Login to Order
+						</div>
+					)}
+				</div>
 			</div>
 		</div>
-	</div>
-);
+	);
+};
+
+
+
+
+
+
+
+
+

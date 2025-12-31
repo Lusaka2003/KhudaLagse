@@ -3,22 +3,31 @@ import { useNavigate } from 'react-router-dom';
 import axiosInstance from '../api/axios';
 
 const FALLBACK_IMAGE = 'https://images.pexels.com/photos/1640777/pexels-photo-1640777.jpeg?auto=compress&cs=tinysrgb&w=800';
-const DAYS = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
-const MEALS = ['lunch','dinner'];
+const MEALS = ['lunch', 'dinner'];
 
-// Helper: Get next occurrence of a given weekday
-function getNextDateForDay(dayName) {
-    const dayIndex = DAYS.indexOf(dayName.toLowerCase());
-    if (dayIndex === -1) return new Date();
-
+// Helper: Get all dates for the next 30 days
+// Helper: Get all dates for the next 30 days
+function getNext30Days() {
+    const days = [];
     const today = new Date();
-    const todayIndex = today.getDay(); // 0=Sunday, 1=Monday, ...
-
-    let diff = dayIndex - todayIndex;
-    if (diff <= 0) diff += 7; // next occurrence
-    const nextDate = new Date();
-    nextDate.setDate(today.getDate() + diff);
-    return nextDate;
+    const todayMs = today.getTime();
+    const dayInMs = 24 * 60 * 60 * 1000;
+    
+    for (let i = 0; i < 30; i++) {
+        const date = new Date(todayMs + (i * dayInMs));
+        days.push({
+            date: date,
+            dateString: date.toISOString().split('T')[0],
+            displayDate: date.toLocaleDateString('en-US', { 
+                weekday: 'short', 
+                month: 'short', 
+                day: 'numeric' 
+            }),
+            dayName: date.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase()
+        });
+    }
+    
+    return days;
 }
 
 export default function ManageMenu() {
@@ -30,17 +39,23 @@ export default function ManageMenu() {
         price: '',
         calories: '',
         ingredients: '',
-        day: '',
+        dates: [],
         mealType: '',
+        imageUrl: '',
     });
+    const [imageFile, setImageFile] = useState(null);
+    const [imagePreview, setImagePreview] = useState('');
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
     const [editingId, setEditingId] = useState(null);
+    const [viewMode, setViewMode] = useState('calendar');
 
     const formRef = useRef(null);
     const nameInputRef = useRef(null);
     const [highlightEdit, setHighlightEdit] = useState(false);
+
+    const next30Days = getNext30Days();
 
     useEffect(() => {
         loadItems();
@@ -63,6 +78,38 @@ export default function ManageMenu() {
         setForm({ ...form, [e.target.name]: e.target.value });
     };
 
+    const handleDateToggle = (dateString) => {
+        setForm(prev => ({
+            ...prev,
+            dates: prev.dates.includes(dateString)
+                ? prev.dates.filter(d => d !== dateString)
+                : [...prev.dates, dateString]
+        }));
+    };
+
+    const handleSelectAllDates = () => {
+        setForm(prev => ({
+            ...prev,
+            dates: next30Days.map(d => d.dateString)
+        }));
+    };
+
+    const handleClearAllDates = () => {
+        setForm(prev => ({ ...prev, dates: [] }));
+    };
+
+    const handleImageChange = (e) => {
+        const file = e.target.files?.[0];
+        if (file) {
+            setImageFile(file);
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                setImagePreview(reader.result);
+            };
+            reader.readAsDataURL(file);
+        }
+    };
+
     const handleSubmit = async (e) => {
         e.preventDefault();
         setError('');
@@ -75,8 +122,8 @@ export default function ManageMenu() {
             setError('Valid price is required');
             return;
         }
-        if (!form.day) {
-            setError('Please select a day');
+        if (!form.dates || form.dates.length === 0) {
+            setError('Please select at least one date');
             return;
         }
         if (!form.mealType) {
@@ -91,7 +138,23 @@ export default function ManageMenu() {
         setSaving(true);
 
         try {
-            const payload = {
+            // Upload image if provided
+            let uploadedImageUrl = form.imageUrl;
+            if (imageFile) {
+                const formData = new FormData();
+                formData.append('image', imageFile);
+                try {
+                    const uploadRes = await axiosInstance.post('/api/upload', formData, {
+                        headers: { 'Content-Type': 'multipart/form-data' }
+                    });
+                    uploadedImageUrl = uploadRes.data.url;
+                } catch (uploadErr) {
+                    console.error('Image upload failed:', uploadErr);
+                    setError('Image upload failed, but continuing with item creation');
+                }
+            }
+
+            const basePayload = {
                 name: form.name.trim(),
                 description: form.description.trim(),
                 price: Number(form.price),
@@ -99,25 +162,48 @@ export default function ManageMenu() {
                 ingredients: form.ingredients
                     ? form.ingredients.split(',').map(i => i.trim()).filter(Boolean)
                     : [],
-                day: form.day,
                 mealType: form.mealType,
-                date: getNextDateForDay(form.day).toISOString(),
+                imageUrl: uploadedImageUrl || undefined,
             };
 
             if (editingId) {
-                await axiosInstance.put(`/api/menu/${editingId}`, payload);
+                // When editing, update the single item
+                const item = items.find(i => i._id === editingId);
+                await axiosInstance.put(`/api/menu/${editingId}`, {
+                    ...basePayload,
+                    day: item.day,
+                    date: item.date,
+                });
                 setEditingId(null);
             } else {
-                // Replace old menu for same day + meal type
-                const existingItem = items.find(i => i.day === form.day && i.mealType === form.mealType);
-                if (existingItem) {
-                    await axiosInstance.put(`/api/menu/${existingItem._id}`, payload);
-                } else {
+                // When creating, add item for each selected date
+                // REMOVED the replacement logic - now always creates new items
+                for (const dateString of form.dates) {
+                    const selectedDay = next30Days.find(d => d.dateString === dateString);
+                    
+                    const payload = {
+                        ...basePayload,
+                        day: selectedDay.dayName,
+                        date: new Date(dateString).toISOString(),
+                    };
+
+                    // Always create a new item (no replacement)
                     await axiosInstance.post('/api/menu', payload);
                 }
             }
 
-            setForm({ name: '', description: '', price: '', calories: '', ingredients: '', day: '', mealType: '' });
+            setForm({ 
+                name: '', 
+                description: '', 
+                price: '', 
+                calories: '', 
+                ingredients: '', 
+                dates: [], 
+                mealType: '', 
+                imageUrl: '' 
+            });
+            setImageFile(null);
+            setImagePreview('');
             loadItems();
         } catch (err) {
             setError(err.response?.data?.message || err.message || 'Failed to save');
@@ -127,16 +213,21 @@ export default function ManageMenu() {
     };
 
     const handleEdit = (item) => {
+        const itemDate = new Date(item.date).toISOString().split('T')[0];
+        
         setForm({
             name: item.name || '',
             description: item.description || '',
             price: item.price ?? '',
             calories: item.calories ?? '',
             ingredients: Array.isArray(item.ingredients) ? item.ingredients.join(', ') : (item.ingredients || ''),
-            day: item.day || '',
+            dates: [itemDate],
             mealType: item.mealType || '',
+            imageUrl: item.imageUrl || '',
         });
         setEditingId(item._id);
+        setImagePreview(item.imageUrl || '');
+        setImageFile(null);
 
         setTimeout(() => {
             if (formRef.current) window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -147,9 +238,20 @@ export default function ManageMenu() {
     };
 
     const handleCancel = () => {
-        setForm({ name: '', description: '', price: '', calories: '', ingredients: '', day: '', mealType: '' });
+        setForm({ 
+            name: '', 
+            description: '', 
+            price: '', 
+            calories: '', 
+            ingredients: '', 
+            dates: [], 
+            mealType: '', 
+            imageUrl: '' 
+        });
         setEditingId(null);
         setError('');
+        setImageFile(null);
+        setImagePreview('');
     };
 
     const handleDelete = async (id) => {
@@ -173,17 +275,33 @@ export default function ManageMenu() {
         }
     };
 
+    // Group items by date for calendar view
+    const itemsByDate = items.reduce((acc, item) => {
+        const dateKey = new Date(item.date).toISOString().split('T')[0];
+        if (!acc[dateKey]) acc[dateKey] = [];
+        acc[dateKey].push(item);
+        return acc;
+    }, {});
+
     return (
         <div className="min-h-screen pt-40 bg-white pb-8">
-            <div className="max-w-4xl mx-auto px-4">
+            <div className="max-w-6xl mx-auto px-4">
                 <div className="flex items-center justify-between mb-6">
-                    <h1 className="text-3xl font-bold text-gray-900">Manage Menu</h1>
-                    <button
-                        onClick={() => navigate('/dashboard/restaurant')}
-                        className="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 transition"
-                    >
-                        Back
-                    </button>
+                    <h1 className="text-3xl font-bold text-gray-900">Manage Monthly Menu</h1>
+                    <div className="flex gap-3">
+                        <button
+                            onClick={() => setViewMode(viewMode === 'calendar' ? 'list' : 'calendar')}
+                            className="px-4 py-2 bg-violet-100 text-violet-800 rounded-lg hover:bg-violet-200 transition font-semibold"
+                        >
+                            {viewMode === 'calendar' ? 'List View' : 'Calendar View'}
+                        </button>
+                        <button
+                            onClick={() => navigate('/dashboard/restaurant')}
+                            className="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 transition"
+                        >
+                            Back
+                        </button>
+                    </div>
                 </div>
 
                 {/* Add/Edit Form */}
@@ -202,37 +320,23 @@ export default function ManageMenu() {
                     )}
 
                     <form onSubmit={handleSubmit} className="space-y-4">
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                                Item Name <span className="text-red-500">*</span>
-                            </label>
-                            <input
-                                ref={nameInputRef}
-                                type="text"
-                                name="name"
-                                value={form.name}
-                                onChange={handleChange}
-                                className="w-full px-4 py-2 rounded-lg border-2 border-gray-200 focus:border-violet-500 focus:outline-none"
-                                placeholder="e.g., Margherita Pizza"
-                                required
-                            />
-                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Item Name <span className="text-red-500">*</span>
+                                </label>
+                                <input
+                                    ref={nameInputRef}
+                                    type="text"
+                                    name="name"
+                                    value={form.name}
+                                    onChange={handleChange}
+                                    className="w-full px-4 py-2 rounded-lg border-2 border-gray-200 focus:border-violet-500 focus:outline-none"
+                                    placeholder="e.g., Margherita Pizza"
+                                    required
+                                />
+                            </div>
 
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                                Description
-                            </label>
-                            <textarea
-                                name="description"
-                                value={form.description}
-                                onChange={handleChange}
-                                className="w-full px-4 py-2 rounded-lg border-2 border-gray-200 focus:border-violet-500 focus:outline-none resize-none"
-                                placeholder="Item description (optional)"
-                                rows="3"
-                            />
-                        </div>
-
-                        <div className="grid grid-cols-1 md:grid-cols-1 gap-3">
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-1">
                                     Price <span className="text-red-500">*</span>
@@ -249,7 +353,23 @@ export default function ManageMenu() {
                                     required
                                 />
                             </div>
+                        </div>
 
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                                Description
+                            </label>
+                            <textarea
+                                name="description"
+                                value={form.description}
+                                onChange={handleChange}
+                                className="w-full px-4 py-2 rounded-lg border-2 border-gray-200 focus:border-violet-500 focus:outline-none resize-none"
+                                placeholder="Item description (optional)"
+                                rows="2"
+                            />
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-1">
                                     Calories (kcal)
@@ -263,40 +383,6 @@ export default function ManageMenu() {
                                     placeholder="e.g., 250"
                                     min="0"
                                 />
-                            </div>
-
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">
-                                    Ingredients (comma separated)
-                                </label>
-                                <input
-                                    type="text"
-                                    name="ingredients"
-                                    value={form.ingredients}
-                                    onChange={handleChange}
-                                    className="w-full px-4 py-2 rounded-lg border-2 border-gray-200 focus:border-violet-500 focus:outline-none"
-                                    placeholder="sugar, tea, milk"
-                                />
-                            </div>
-
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">
-                                    Day <span className="text-red-500">*</span>
-                                </label>
-                                <select
-                                    name="day"
-                                    value={form.day}
-                                    onChange={handleChange}
-                                    className="w-full px-4 py-2 rounded-lg border-2 border-gray-200 focus:border-violet-500 focus:outline-none"
-                                    required
-                                >
-                                    <option value="">Select a day</option>
-                                    {DAYS.map(day => (
-                                        <option key={day} value={day}>
-                                            {day.charAt(0).toUpperCase() + day.slice(1)}
-                                        </option>
-                                    ))}
-                                </select>
                             </div>
 
                             <div>
@@ -318,6 +404,114 @@ export default function ManageMenu() {
                                     ))}
                                 </select>
                             </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Item Image
+                                </label>
+                                <input
+                                    type="file"
+                                    accept="image/*"
+                                    onChange={handleImageChange}
+                                    className="w-full px-4 py-2 rounded-lg border-2 border-gray-200 focus:border-violet-500 focus:outline-none"
+                                />
+                            </div>
+                        </div>
+
+                        {imagePreview && (
+                            <div className="mt-2">
+                                <img 
+                                    src={imagePreview} 
+                                    alt="Preview" 
+                                    className="w-32 h-24 object-cover rounded-lg border-2 border-gray-200"
+                                />
+                            </div>
+                        )}
+
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                                Ingredients (comma separated)
+                            </label>
+                            <input
+                                type="text"
+                                name="ingredients"
+                                value={form.ingredients}
+                                onChange={handleChange}
+                                className="w-full px-4 py-2 rounded-lg border-2 border-gray-200 focus:border-violet-500 focus:outline-none"
+                                placeholder="sugar, tea, milk"
+                            />
+                        </div>
+
+                        <div>
+                            <div className="flex items-center justify-between mb-2">
+                                <label className="block text-sm font-medium text-gray-700">
+                                    Select Dates (Next 30 Days) <span className="text-red-500">*</span>
+                                </label>
+                                <div className="flex gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={handleSelectAllDates}
+                                        disabled={editingId}
+                                        className="text-xs px-3 py-1 rounded border border-violet-200 text-violet-700 hover:bg-violet-50 disabled:opacity-50"
+                                    >
+                                        Select All
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={handleClearAllDates}
+                                        disabled={editingId}
+                                        className="text-xs px-3 py-1 rounded border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                                    >
+                                        Clear All
+                                    </button>
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-5 sm:grid-cols-7 gap-2 max-h-64 overflow-y-auto p-2 bg-gray-50 rounded-lg">
+                                {next30Days.map(day => {
+                                    const isSelected = form.dates.includes(day.dateString);
+                                    const hasItems = itemsByDate[day.dateString];
+                                    
+                                    return (
+                                        <label
+                                            key={day.dateString}
+                                            className={`flex flex-col items-center p-2 rounded-lg border-2 cursor-pointer transition text-center ${
+                                                isSelected
+                                                    ? 'border-violet-500 bg-violet-50'
+                                                    : hasItems
+                                                    ? 'border-blue-200 bg-blue-50'
+                                                    : 'border-gray-200 hover:border-violet-300'
+                                            } ${editingId ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                        >
+                                            <input
+                                                type="checkbox"
+                                                checked={isSelected}
+                                                onChange={() => handleDateToggle(day.dateString)}
+                                                className="sr-only"
+                                                disabled={editingId}
+                                            />
+                                            <span className="text-xs font-medium text-gray-600">
+                                                {day.displayDate.split(',')[0]}
+                                            </span>
+                                            <span className="text-sm font-bold mt-1">
+                                                {day.date.getDate()}
+                                            </span>
+                                            {hasItems && (
+                                                <span className="text-[10px] text-blue-600 mt-1">
+                                                    {hasItems.length} item{hasItems.length > 1 ? 's' : ''}
+                                                </span>
+                                            )}
+                                        </label>
+                                    );
+                                })}
+                            </div>
+                            {editingId && (
+                                <p className="text-xs text-gray-500 mt-2">
+                                    Date cannot be changed when editing. Delete and recreate to change date.
+                                </p>
+                            )}
+                            <p className="text-xs text-gray-500 mt-2">
+                                Selected: {form.dates.length} date{form.dates.length !== 1 ? 's' : ''}
+                            </p>
                         </div>
 
                         <div className="flex gap-3 pt-2">
@@ -341,9 +535,11 @@ export default function ManageMenu() {
                     </form>
                 </div>
 
-                {/* Menu Items List */}
+                {/* Menu Items Display */}
                 <div className="bg-white rounded-xl shadow-md p-6">
-                    <h2 className="text-xl font-semibold text-gray-900 mb-4">Menu Items</h2>
+                    <h2 className="text-xl font-semibold text-gray-900 mb-4">
+                        Menu Items ({items.length})
+                    </h2>
 
                     {loading ? (
                         <div className="text-center py-8">
@@ -354,7 +550,7 @@ export default function ManageMenu() {
                         <div className="text-center py-8 text-gray-500">
                             No menu items yet. Add your first item above!
                         </div>
-                    ) : (
+                    ) : viewMode === 'list' ? (
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             {items.map((item) => (
                                 <div key={item._id} className="border-2 border-gray-100 rounded-lg p-4 hover:shadow-md transition flex flex-col">
@@ -373,25 +569,20 @@ export default function ManageMenu() {
                                                 <div className="font-semibold">{item.name}</div>
                                                 <div className="text-sm text-gray-600">{item.description}</div>
                                                 <div className="text-xs text-gray-500 mt-1">
-                                                    {item.day?.charAt(0).toUpperCase() + item.day?.slice(1)}
-                                                    {item.date && ` - ${new Date(item.date).toLocaleDateString()}`}
+                                                    {new Date(item.date).toLocaleDateString('en-US', { 
+                                                        weekday: 'short', 
+                                                        month: 'short', 
+                                                        day: 'numeric' 
+                                                    })}
                                                     {item.mealType && ` | ${item.mealType.charAt(0).toUpperCase() + item.mealType.slice(1)}`}
                                                 </div>
                                                 {item.calories !== undefined && item.calories !== null && (
                                                     <div className="text-xs text-gray-500 mt-1">Calories: {item.calories} kcal</div>
                                                 )}
-                                                {item.ingredients && item.ingredients.length > 0 && (
-                                                    <div className="text-xs text-gray-500 mt-1">Ingredients: {Array.isArray(item.ingredients) ? item.ingredients.join(', ') : item.ingredients}</div>
-                                                )}
-                                                {item.adminComment ? (
+                                                {item.adminComment && (
                                                     <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
                                                         <div className="font-semibold">Admin comment</div>
                                                         <div className="mt-1 whitespace-pre-wrap">{item.adminComment}</div>
-                                                        {item.adminCommentedAt ? (
-                                                            <div className="mt-1 text-[11px] text-amber-800">
-                                                                {new Date(item.adminCommentedAt).toLocaleString()}
-                                                            </div>
-                                                        ) : null}
                                                         <div className="mt-2">
                                                             <button
                                                                 type="button"
@@ -402,7 +593,7 @@ export default function ManageMenu() {
                                                             </button>
                                                         </div>
                                                     </div>
-                                                ) : null}
+                                                )}
                                             </div>
                                         </div>
 
@@ -427,6 +618,74 @@ export default function ManageMenu() {
                                     </div>
                                 </div>
                             ))}
+                        </div>
+                    ) : (
+                        // Calendar View
+                        <div className="space-y-6">
+                            {next30Days.map(day => {
+                                const dayItems = itemsByDate[day.dateString] || [];
+                                
+                                return (
+                                    <div key={day.dateString} className="border border-gray-200 rounded-lg p-4">
+                                        <div className="flex items-center justify-between mb-3">
+                                            <h3 className="font-semibold text-gray-900">
+                                                {day.displayDate} - {day.dayName.charAt(0).toUpperCase() + day.dayName.slice(1)}
+                                            </h3>
+                                            <span className="text-sm text-gray-500">
+                                                {dayItems.length} item{dayItems.length !== 1 ? 's' : ''}
+                                            </span>
+                                        </div>
+                                        
+                                        {dayItems.length === 0 ? (
+                                            <p className="text-sm text-gray-400 italic">No items scheduled</p>
+                                        ) : (
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                                {dayItems.map(item => (
+                                                    <div key={item._id} className="flex gap-3 border border-gray-100 rounded-lg p-3 hover:shadow-sm transition">
+                                                        <img
+                                                            src={item.imageUrl || FALLBACK_IMAGE}
+                                                            alt={item.name}
+                                                            onError={(e) => {
+                                                                e.currentTarget.onerror = null;
+                                                                e.currentTarget.src = FALLBACK_IMAGE;
+                                                            }}
+                                                            className="w-16 h-16 object-cover rounded flex-shrink-0"
+                                                        />
+                                                        <div className="flex-1 min-w-0">
+                                                            <div className="font-medium text-sm truncate">{item.name}</div>
+                                                            <div className="text-xs text-gray-500">
+                                                                {item.mealType?.charAt(0).toUpperCase() + item.mealType?.slice(1)}
+                                                            </div>
+                                                            <div className="text-sm font-semibold text-violet-700 mt-1">
+                                                                {item.price} BDT
+                                                            </div>
+                                                            {item.adminComment && (
+                                                                <div className="mt-1 text-[10px] text-amber-700 bg-amber-50 px-2 py-1 rounded">
+                                                                    Admin comment
+                                                                </div>
+                                                            )}
+                                                            <div className="flex gap-2 mt-2">
+                                                                <button
+                                                                    onClick={() => handleEdit(item)}
+                                                                    className="text-xs px-2 py-1 rounded border border-violet-200 text-violet-700 hover:bg-violet-50"
+                                                                >
+                                                                    Edit
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => handleDelete(item._id)}
+                                                                    className="text-xs px-2 py-1 rounded border border-gray-200 text-gray-700 hover:bg-gray-50"
+                                                                >
+                                                                    Delete
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
                         </div>
                     )}
                 </div>

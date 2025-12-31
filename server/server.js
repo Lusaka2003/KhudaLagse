@@ -15,6 +15,7 @@ import deliveryRoutes from "./routes/deliveryRoutes.js";
 import adminRoutes from "./routes/adminRoutes.js";
 import referralRoutes from "./routes/referralRoutes.js";
 import subscriptionRoutes from "./routes/subscriptionRoutes.js";
+import uploadRoutes from "./routes/uploadRoutes.js"; // ADD THIS
 import { User } from "./models/User.js";
 
 // Get the directory name of the current module
@@ -40,6 +41,9 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Serve uploaded files statically - ADD THIS
+app.use('/uploads', express.static(join(__dirname, 'uploads')));
+
 // Routes
 app.get('/', (req, res) => {
     res.send('Backend API is running!');
@@ -47,7 +51,6 @@ app.get('/', (req, res) => {
 app.use('/api/restaurants', restaurantRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/menu', menuRoutes);
-
 app.use('/api/orders', orderRoutes);
 app.use("/api/reviews", reviewRoutes);
 app.use("/api/wallet", walletRoutes);
@@ -55,6 +58,7 @@ app.use("/api/deliveries", deliveryRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/referrals", referralRoutes);
 app.use("/api/subscriptions", subscriptionRoutes);
+app.use("/api/upload", uploadRoutes); // ADD THIS
 
 // Error handler middleware (must be last)
 app.use(errorHandler);

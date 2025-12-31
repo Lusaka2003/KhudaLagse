@@ -6,6 +6,7 @@ import {
 	getDashboard,
 	listUsers,
 	updateUser,
+	deleteUser,
 	listOrders,
 	updateOrderStatus,
 	listDeliveries,
@@ -29,11 +30,11 @@ import {
 const router = express.Router();
 
 router.post('/bootstrap', bootstrapAdmin);
-
 router.get('/dashboard', protect, requireAdmin, getDashboard);
 
 router.get('/users', protect, requireAdmin, listUsers);
 router.patch('/users/:id', protect, requireAdmin, updateUser);
+router.delete('/users/:id', protect, requireAdmin, deleteUser);
 
 router.get('/orders', protect, requireAdmin, listOrders);
 router.patch('/orders/:id/status', protect, requireAdmin, updateOrderStatus);
@@ -59,4 +60,3 @@ router.get('/reviews', protect, requireAdmin, listReviews);
 router.patch('/reviews/:id/status', protect, requireAdmin, updateReviewStatus);
 
 export default router;
-
