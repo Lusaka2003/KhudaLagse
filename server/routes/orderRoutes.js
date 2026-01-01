@@ -6,7 +6,6 @@ import Subscription from "../models/Subscription.js";
 import Delivery from "../models/Delivery.js";
 import Referral from "../models/Referral.js";
 import DeliveryStaffReview from "../models/DeliveryStaffReview.js";
-
 import jwt from "jsonwebtoken";
 
 const router = express.Router();
@@ -16,7 +15,7 @@ const router = express.Router();
 ---------------------------------- */
 const protect = async (req, res, next) => {
   try {
-    const token = req.headers.authorization?.split(" ")[1]; // Bearer <token>
+    const token = req.headers.authorization?.split(" ")[1];
     if (!token) return res.status(401).json({ message: "Unauthorized: No token" });
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
@@ -32,42 +31,41 @@ const protect = async (req, res, next) => {
 
 /* ----------------------------------
    POST /api/orders
-   Create a new order with delivery date & time
-   Validates wallet balance and subscription (if applicable)
-   Processes payment and creates payment record
 ---------------------------------- */
 router.post("/", protect, async (req, res) => {
   try {
-    const { restaurantId, items, total, deliveryDateTime, paymentMethod = "wallet" } = req.body;
+    const {
+      restaurantId,
+      items,
+      total,
+      deliveryDateTime,
+      paymentMethod = "wallet",
+      deliveryAddress,
+    } = req.body;
 
     if (!restaurantId || !items || !items.length || !total || !deliveryDateTime) {
       return res.status(400).json({ message: "Missing required fields" });
     }
 
+    // Validate delivery address
+    if (!deliveryAddress || !deliveryAddress.fullAddress || !deliveryAddress.coordinates) {
+      return res.status(400).json({ 
+        message: "Delivery address is required with fullAddress and coordinates" 
+      });
+    }
+
     const userId = req.userId;
     const user = await User.findById(userId);
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
+    if (!user) return res.status(404).json({ message: "User not found" });
 
     // Only customers can place orders
     if (user.role !== "customer") {
       return res.status(403).json({ 
-        message: "Only customers can place orders. Restaurants and delivery drivers cannot place orders." 
+        message: "Only customers can place orders" 
       });
     }
 
-    // Check for active subscription (optional - if subscription exists)
-    const activeSubscription = await Subscription.findOne({
-      user: userId,
-      status: "active",
-      $or: [
-        { endDate: { $gte: new Date() } },
-        { endDate: null }
-      ]
-    });
-
-    // Validate wallet balance if paying with wallet
+    // Validate wallet balance
     if (paymentMethod === "wallet") {
       const walletBalance = user.walletBalance || 0;
       if (walletBalance < total) {
@@ -79,28 +77,31 @@ router.post("/", protect, async (req, res) => {
       }
     }
 
-    // Convert deliveryDateTime to Date object
+    // Validate deliveryDateTime
     const deliveryDate = new Date(deliveryDateTime);
     if (isNaN(deliveryDate.getTime())) {
       return res.status(400).json({ message: "Invalid deliveryDateTime format" });
     }
 
-    // Validate items array
+    // Validate items
     if (!Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({ message: "Items array is required and must not be empty" });
+      return res.status(400).json({ message: "Items array is required" });
     }
 
-    // Validate each item
     for (const item of items) {
       if (!item.itemId || !item.quantity || item.quantity < 1 || !item.price || item.price < 0) {
-        return res.status(400).json({ message: "Each item must have valid itemId, quantity (>=1), and price (>=0)" });
+        return res.status(400).json({ 
+          message: "Each item must have valid itemId, quantity (>=1), and price (>=0)" 
+        });
       }
       if (!item.mealType || !["lunch", "dinner"].includes(item.mealType)) {
-        return res.status(400).json({ message: "Each item must have a valid mealType (lunch or dinner)" });
+        return res.status(400).json({ 
+          message: "Each item must have a valid mealType (lunch or dinner)" 
+        });
       }
     }
 
-    // Create order
+    // Create order with deliveryAddress
     const order = new Order({
       restaurantId,
       userId,
@@ -108,11 +109,20 @@ router.post("/", protect, async (req, res) => {
       total,
       status: "pending",
       deliveryDateTime: deliveryDate,
+      deliveryAddress: {
+        fullAddress: deliveryAddress.fullAddress,
+        coordinates: {
+          type: "Point",
+          coordinates: deliveryAddress.coordinates,
+        },
+        house: deliveryAddress.house || "",
+        road: deliveryAddress.road || "",
+        area: deliveryAddress.area || "",
+        city: deliveryAddress.city || "Dhaka",
+      },
     });
 
-    const saved = await order.save();
-
-    // Order is created as 'pending'. Delivery will be created only when restaurant marks it as 'ready'.
+    const savedOrder = await order.save();
 
     // Process payment
     if (paymentMethod === "wallet") {
@@ -123,15 +133,14 @@ router.post("/", protect, async (req, res) => {
       // Create payment record
       await Payment.create({
         user: userId,
-        order: saved._id,
+        order: savedOrder._id,
         amount: total,
         type: "order_payment",
         method: "wallet",
         status: "success",
       });
 
-
-
+      // Loyalty rewards
       const orderPaymentCount = await Payment.countDocuments({
         user: userId,
         type: "order_payment",
@@ -162,28 +171,26 @@ router.post("/", protect, async (req, res) => {
         }
       }
     } else {
-      // For card/local_app, create pending payment record
-      // In production, integrate with payment gateway here
+      // For other payment methods
       await Payment.create({
         user: userId,
-        order: saved._id,
+        order: savedOrder._id,
         amount: total,
         type: "order_payment",
         method: paymentMethod,
-        status: "pending", // Will be updated when payment gateway confirms
+        status: "pending",
       });
     }
 
-    res.status(201).json(saved);
+    res.status(201).json(savedOrder);
   } catch (error) {
     console.error("Order creation error:", error);
-    res.status(500).json({ message: "Failed to create order" });
+    res.status(500).json({ message: "Failed to create order", error: error.message });
   }
 });
 
 /* ----------------------------------
    GET /api/orders/user/:userId
-   Returns orders with payment and delivery info
 ---------------------------------- */
 router.get("/user/:userId", protect, async (req, res) => {
   try {
@@ -191,7 +198,6 @@ router.get("/user/:userId", protect, async (req, res) => {
       .sort({ createdAt: -1 })
       .populate("items.itemId", "name price");
 
-    // Enrich orders with payment and delivery info
     const enrichedOrders = await Promise.all(
       orders.map(async (order) => {
         const payment = await Payment.findOne({
@@ -221,8 +227,8 @@ router.get("/user/:userId", protect, async (req, res) => {
 router.get("/restaurant/:restaurantId", protect, async (req, res) => {
   try {
     const orders = await Order.find({ restaurantId: req.params.restaurantId })
-      .populate("userId", "name email phone")  // customer info
-      .populate("items.itemId", "name price"); // menu item info
+      .populate("userId", "name email phone")
+      .populate("items.itemId", "name price");
 
     res.json(orders);
   } catch (err) {
@@ -232,44 +238,135 @@ router.get("/restaurant/:restaurantId", protect, async (req, res) => {
 });
 
 /* ----------------------------------
+   GET /api/orders/calendar
+   Get user's orders for a date range (for calendar view)
+---------------------------------- */
+router.get("/calendar", protect, async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+    
+    if (!startDate || !endDate) {
+      return res.status(400).json({ 
+        success: false,
+        message: "startDate and endDate are required" 
+      });
+    }
+
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+      return res.status(400).json({ 
+        success: false,
+        message: "Invalid date format. Use YYYY-MM-DD" 
+      });
+    }
+
+    // Adjust end date to include the entire day
+    end.setHours(23, 59, 59, 999);
+
+    console.log(`📅 Fetching calendar data for user ${req.userId} from ${startDate} to ${endDate}`);
+
+    // Get orders for the user within the date range
+    const orders = await Order.find({
+      userId: req.userId,
+      deliveryDateTime: { $gte: start, $lte: end },
+      status: { $nin: ['cancelled'] } // Exclude cancelled orders
+    })
+      .populate("items.itemId", "name price mealType imageUrl calories")
+      .populate("restaurantId", "name imageUrl")
+      .sort({ deliveryDateTime: 1 });
+
+    console.log(`📊 Found ${orders.length} orders for the date range`);
+
+    // Group orders by date
+    const groupedByDate = {};
+    
+    orders.forEach(order => {
+      const deliveryDate = new Date(order.deliveryDateTime);
+      const dateKey = deliveryDate.toISOString().split('T')[0]; // YYYY-MM-DD
+      
+      if (!groupedByDate[dateKey]) {
+        groupedByDate[dateKey] = {
+          date: dateKey,
+          orders: []
+        };
+      }
+
+      // Flatten each item in the order
+      order.items.forEach(item => {
+        groupedByDate[dateKey].orders.push({
+          _id: order._id,
+          orderId: order._id,
+          itemId: item.itemId,
+          restaurant: order.restaurantId,
+          mealType: item.mealType || (item.itemId?.mealType || 'lunch').toLowerCase(),
+          quantity: item.quantity,
+          price: item.price,
+          status: order.status,
+          isSubscription: order.isSubscription || false,
+          deliveryDateTime: order.deliveryDateTime,
+          createdAt: order.createdAt
+        });
+      });
+    });
+
+    // Convert to array format for frontend
+    const result = Object.values(groupedByDate);
+
+    console.log(`✅ Calendar data prepared: ${result.length} days with meals`);
+
+    res.json({
+      success: true,
+      data: result
+    });
+
+  } catch (error) {
+    console.error("Calendar endpoint error:", error);
+    res.status(500).json({ 
+      success: false,
+      message: "Failed to fetch calendar data",
+      error: error.message 
+    });
+  }
+});
+
+/* ----------------------------------
    PATCH /api/orders/:orderId/status
-   Updates order status and creates delivery record when accepted
 ---------------------------------- */
 router.patch("/:orderId/status", protect, async (req, res) => {
   try {
     const { orderId } = req.params;
-    const { status, completionTime } = req.body;
+    const { status } = req.body;
 
     if (!["pending", "cooking", "ready", "completed", "cancelled"].includes(status)) {
       return res.status(400).json({ message: "Invalid status value" });
     }
 
-    const order = await Order.findById(orderId).populate("userId");
+    const order = await Order.findById(orderId);
     if (!order) return res.status(404).json({ message: "Order not found" });
 
-    // When status is changed to 'ready', create the unassigned delivery record
+    // Create delivery record when order is ready
     if (status === "ready" && order.status !== "ready") {
       const existingDelivery = await Delivery.findOne({ order: orderId });
       if (!existingDelivery) {
-        const customer = await User.findById(order.userId);
-        const address = customer?.address || {
-          house: "",
-          road: "",
-          area: "",
-          city: "",
-        };
-
+        // Use the deliveryAddress from the order
         await Delivery.create({
           order: orderId,
           customer: order.userId,
-          address,
+          address: order.deliveryAddress || {
+            house: "",
+            road: "",
+            area: "",
+            city: "",
+          },
           status: "unassigned",
-          completionTime: order.deliveryDateTime, // or a specific ready time
+          completionTime: order.deliveryDateTime,
         });
       }
     }
 
-    // If order is cancelled, process refund
+    // Process refund if cancelled
     if (status === "cancelled" && order.status !== "cancelled") {
       const payment = await Payment.findOne({
         order: orderId,
@@ -278,13 +375,11 @@ router.patch("/:orderId/status", protect, async (req, res) => {
       });
 
       if (payment && payment.method === "wallet") {
-        // Refund to wallet
         const user = await User.findById(order.userId);
         if (user) {
           user.walletBalance = (user.walletBalance || 0) + payment.amount;
           await user.save();
 
-          // Create refund record
           await Payment.create({
             user: order.userId,
             order: orderId,
@@ -296,14 +391,13 @@ router.patch("/:orderId/status", protect, async (req, res) => {
         }
       }
 
-      // Also cancel associated delivery if it exists
       await Delivery.findOneAndUpdate({ order: orderId }, { status: "cancelled" });
     }
 
     order.status = status;
-    const updated = await order.save();
+    const updatedOrder = await order.save();
 
-    // Replicate referral logic if completed
+    // Process referral rewards for completed orders
     if (status === "completed" || status === "delivered") {
       try {
         const customer = await User.findById(order.userId);
@@ -311,13 +405,13 @@ router.patch("/:orderId/status", protect, async (req, res) => {
           const referral = await Referral.findOne({
             referrer: customer.referredBy,
             referredUser: order.userId,
-            status: "pending"
+            status: "pending",
           });
 
           if (referral) {
             const rewardAmount = 30;
             const referrer = await User.findById(customer.referredBy);
-            
+
             // Reward Referrer
             if (referrer) {
               referrer.walletBalance = (referrer.walletBalance || 0) + rewardAmount;
@@ -329,7 +423,11 @@ router.patch("/:orderId/status", protect, async (req, res) => {
                 type: "referral_reward",
                 method: "wallet",
                 status: "success",
-                metadata: { kind: "referrer_reward", referredUserId: String(order.userId), orderId: String(order._id) }
+                metadata: {
+                  kind: "referrer_reward",
+                  referredUserId: String(order.userId),
+                  orderId: String(order._id),
+                },
               });
             }
 
@@ -343,7 +441,11 @@ router.patch("/:orderId/status", protect, async (req, res) => {
               type: "referral_reward",
               method: "wallet",
               status: "success",
-              metadata: { kind: "referred_user_reward", referrerId: String(customer.referredBy), orderId: String(order._id) }
+              metadata: {
+                kind: "referred_user_reward",
+                referrerId: String(customer.referredBy),
+                orderId: String(order._id),
+              },
             });
 
             referral.status = "rewarded";
@@ -357,21 +459,15 @@ router.patch("/:orderId/status", protect, async (req, res) => {
       }
     }
 
-
-    res.json(updated);
+    res.json(updatedOrder);
   } catch (error) {
     console.error("Failed to update order status:", error);
-    if (error.message === "No available delivery staff to assign this order") {
-      return res.status(409).json({ message: error.message });
-    }
-    res.status(500).json({ message: "Failed to update order status" });
+    res.status(500).json({ message: "Failed to update order status", error: error.message });
   }
 });
 
-
 /* ----------------------------------
    GET /api/orders/my
-   Get current user's orders (using JWT userId)
 ---------------------------------- */
 router.get("/my", protect, async (req, res) => {
   try {
@@ -380,7 +476,6 @@ router.get("/my", protect, async (req, res) => {
       .populate("items.itemId", "name price")
       .populate("restaurantId", "name");
 
-    // Enrich orders with payment and delivery info
     const enrichedOrders = await Promise.all(
       orders.map(async (order) => {
         const payment = await Payment.findOne({
@@ -389,29 +484,29 @@ router.get("/my", protect, async (req, res) => {
         });
         const delivery = await Delivery.findOne({ order: order._id })
           .populate("deliveryStaff", "name phone");
-        
         const review = await DeliveryStaffReview.exists({ order: order._id });
 
         return {
           ...order.toObject(),
           payment: payment || null,
           delivery: delivery || null,
-          isReviewed: !!review
+          isReviewed: !!review,
         };
-
       })
     );
 
     res.json(enrichedOrders);
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Failed to fetch orders" });
+    console.error("Error in /my endpoint:", error);
+    res.status(500).json({ 
+      message: "Failed to fetch orders", 
+      error: error.message 
+    });
   }
 });
 
 /* ----------------------------------
    GET /api/orders/:orderId
-   Get single order with full details (payment + delivery)
 ---------------------------------- */
 router.get("/:orderId", protect, async (req, res) => {
   try {
@@ -424,7 +519,6 @@ router.get("/:orderId", protect, async (req, res) => {
       return res.status(404).json({ message: "Order not found" });
     }
 
-    // Check if user owns this order or is restaurant owner
     const user = await User.findById(req.userId);
     const isOwner = order.userId._id.toString() === req.userId;
     const isRestaurantOwner = user?.role === "restaurant" && 
@@ -440,26 +534,26 @@ router.get("/:orderId", protect, async (req, res) => {
     });
     const delivery = await Delivery.findOne({ order: order._id })
       .populate("deliveryStaff", "name phone");
-
     const review = await DeliveryStaffReview.exists({ order: order._id });
 
     res.json({
       ...order.toObject(),
       payment: payment || null,
       delivery: delivery || null,
-      isReviewed: !!review
+      isReviewed: !!review,
     });
-
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Failed to fetch order" });
   }
 });
 
+/* ----------------------------------
+   DELETE /api/orders/:orderId
+---------------------------------- */
 router.delete("/:orderId", protect, async (req, res) => {
-  const { orderId } = req.params;
   try {
-    const deleted = await Order.findByIdAndDelete(orderId);
+    const deleted = await Order.findByIdAndDelete(req.params.orderId);
     if (!deleted) return res.status(404).json({ message: "Order not found" });
     res.json({ message: "Order deleted successfully" });
   } catch (err) {

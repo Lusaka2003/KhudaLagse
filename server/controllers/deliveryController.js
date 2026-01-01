@@ -31,26 +31,35 @@ export const getMyAssignedDeliveries = async (req, res) => {
     const deliveries = await Delivery.find({ deliveryStaff: userId })
       .populate({
         path: "order",
-        select: "total items restaurantId userId deliveryDateTime createdAt",
+        select:
+          "total items restaurantId userId deliveryDateTime createdAt deliveryAddress",
         populate: [
-          { path: "restaurantId", select: "name restaurantName location" },
-          { path: "userId", select: "name phone" }
-        ]
+          {
+            path: "restaurantId",
+            select: "name restaurantName location address",
+          },
+          { path: "userId", select: "name phone" },
+        ],
       })
       .populate("customer", "name phone address")
       .sort({ createdAt: -1 });
 
     // Provide totals so frontend can show total deliveries and completed count
-    const totalDeliveries = await Delivery.countDocuments({ deliveryStaff: userId });
-    const completedDeliveries = await Delivery.countDocuments({ deliveryStaff: userId, status: 'delivered' });
+    const totalDeliveries = await Delivery.countDocuments({
+      deliveryStaff: userId,
+    });
+    const completedDeliveries = await Delivery.countDocuments({
+      deliveryStaff: userId,
+      status: "delivered",
+    });
 
     res.status(200).json({
       success: true,
       deliveries,
       totals: {
         totalDeliveries,
-        completedDeliveries
-      }
+        completedDeliveries,
+      },
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -66,7 +75,10 @@ export const updateDeliveryLocation = async (req, res) => {
     const { id } = req.params;
     const { lat, lng, status } = req.body;
 
-    const delivery = await Delivery.findOne({ _id: id, deliveryStaff: staffId });
+    const delivery = await Delivery.findOne({
+      _id: id,
+      deliveryStaff: staffId,
+    });
     if (!delivery) {
       return res
         .status(404)
@@ -83,14 +95,21 @@ export const updateDeliveryLocation = async (req, res) => {
 
     if (status) {
       // Validate status transition
-      const validStatuses = ["assigned", "picked_up", "on_the_way", "delivered"];
+      const validStatuses = [
+        "assigned",
+        "picked_up",
+        "on_the_way",
+        "delivered",
+      ];
       if (validStatuses.includes(status)) {
         delivery.status = status;
 
         // If delivery is completed, process referral reward and update order status
         if (status === "delivered") {
           // Update order status to completed
-          await Order.findByIdAndUpdate(delivery.order, { status: "completed" });
+          await Order.findByIdAndUpdate(delivery.order, {
+            status: "completed",
+          });
 
           try {
             const customer = await User.findById(delivery.customer);
@@ -98,16 +117,17 @@ export const updateDeliveryLocation = async (req, res) => {
               const referral = await Referral.findOne({
                 referrer: customer.referredBy,
                 referredUser: delivery.customer,
-                status: "pending"
+                status: "pending",
               });
 
               if (referral) {
                 const rewardAmount = 30;
-                
+
                 // Reward Referrer
                 const referrer = await User.findById(customer.referredBy);
                 if (referrer) {
-                  referrer.walletBalance = (referrer.walletBalance || 0) + rewardAmount;
+                  referrer.walletBalance =
+                    (referrer.walletBalance || 0) + rewardAmount;
                   await referrer.save();
 
                   await Payment.create({
@@ -120,13 +140,14 @@ export const updateDeliveryLocation = async (req, res) => {
                     metadata: {
                       kind: "referrer_reward",
                       referredUserId: String(delivery.customer),
-                      orderId: String(delivery.order)
-                    }
+                      orderId: String(delivery.order),
+                    },
                   });
                 }
 
                 // Reward Referred User (Customer)
-                customer.walletBalance = (customer.walletBalance || 0) + rewardAmount;
+                customer.walletBalance =
+                  (customer.walletBalance || 0) + rewardAmount;
                 await customer.save();
 
                 await Payment.create({
@@ -139,8 +160,8 @@ export const updateDeliveryLocation = async (req, res) => {
                   metadata: {
                     kind: "referred_user_reward",
                     referrerId: String(customer.referredBy),
-                    orderId: String(delivery.order)
-                  }
+                    orderId: String(delivery.order),
+                  },
                 });
 
                 referral.status = "rewarded";
@@ -214,7 +235,7 @@ export const trackDelivery = async (req, res) => {
 export const getAvailableOffers = async (req, res) => {
   try {
     const userId = req.user._id || req.user.id;
-    
+
     // Check if user is delivery staff
     const user = await User.findById(userId);
     if (!user || user.role !== "deliveryStaff") {
@@ -227,15 +248,14 @@ export const getAvailableOffers = async (req, res) => {
     }
 
     // Only show unassigned deliveries
-    const offers = await Delivery.find({ 
+    const offers = await Delivery.find({
       status: "unassigned",
-      $or: [
-      ]
+      $or: [],
     })
       .populate({
-        path: "order", 
+        path: "order",
         select: "total items restaurantId deliveryDateTime",
-        populate: { path: "restaurantId", select: "name location" }
+        populate: { path: "restaurantId", select: "name location" },
       })
       .populate("customer", "name phone address")
       .sort({ createdAt: -1 });
@@ -263,37 +283,39 @@ export const acceptOffer = async (req, res) => {
 
     // Check if staff is available
     if (user.isAvailable === false) {
-      return res.status(400).json({ success: false, message: "You are not available" });
+      return res
+        .status(400)
+        .json({ success: false, message: "You are not available" });
     }
 
     // Atomic operation: find unassigned delivery and assign it to this staff
     const delivery = await Delivery.findOneAndUpdate(
-      { 
+      {
         _id: deliveryId,
         status: "unassigned",
-        $or: [
-          { deliveryStaff: { $exists: false } },
-          { deliveryStaff: null }
-        ]
+        $or: [{ deliveryStaff: { $exists: false } }, { deliveryStaff: null }],
       },
       {
         deliveryStaff: userId,
-        status: "assigned"
+        status: "assigned",
       },
       { new: true }
     );
 
     if (!delivery) {
-      return res.status(409).json({ 
-        success: false, 
-        message: "Offer already taken by another delivery staff" 
+      return res.status(409).json({
+        success: false,
+        message: "Offer already taken by another delivery staff",
       });
     }
 
     // Populate delivery details
     await delivery.populate([
-      { path: "order", populate: { path: "restaurantId", select: "name location" } },
-      { path: "customer", select: "name phone address" }
+      {
+        path: "order",
+        populate: { path: "restaurantId", select: "name location" },
+      },
+      { path: "customer", select: "name phone address" },
     ]);
 
     res.status(200).json({ success: true, delivery });
@@ -308,7 +330,7 @@ export const acceptOffer = async (req, res) => {
 export const toggleAvailability = async (req, res) => {
   try {
     const userId = req.user._id || req.user.id;
-    
+
     // Check if user is delivery staff
     const user = await User.findById(userId);
     if (!user || user.role !== "deliveryStaff") {
@@ -319,9 +341,9 @@ export const toggleAvailability = async (req, res) => {
     user.isAvailable = !user.isAvailable;
     await user.save();
 
-    res.status(200).json({ 
-      success: true, 
-      isAvailable: user.isAvailable 
+    res.status(200).json({
+      success: true,
+      isAvailable: user.isAvailable,
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -332,7 +354,12 @@ export const toggleAvailability = async (req, res) => {
  * (Optional) Create delivery when order is created.
  * This can be called from order flow later as needed.
  */
-export const createDeliveryForOrder = async (orderId, customerId, staffId, address) => {
+export const createDeliveryForOrder = async (
+  orderId,
+  customerId,
+  staffId,
+  address
+) => {
   const order = await Order.findById(orderId);
   if (!order) {
     throw new Error("Order not found");
@@ -347,5 +374,3 @@ export const createDeliveryForOrder = async (orderId, customerId, staffId, addre
 
   return delivery;
 };
-
-

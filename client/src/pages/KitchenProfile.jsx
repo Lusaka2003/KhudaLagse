@@ -25,6 +25,7 @@ const DAYS = [
 	'friday',
 	'saturday',
 ];
+const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 // Time restrictions
 const ORDER_DEADLINES = {
@@ -45,7 +46,7 @@ const canOrderMeal = (mealType, itemDate = null) => {
 	const now = new Date();
 	const deadline = ORDER_DEADLINES[mealType];
 	
-	if (!deadline) return true; // No restriction for unknown meal types
+	if (!deadline) return true;
 	
 	// Create deadline time for today
 	const deadlineTime = new Date();
@@ -59,7 +60,7 @@ const canOrderMeal = (mealType, itemDate = null) => {
 		const itemDateObj = new Date(itemDate);
 		itemDateObj.setHours(0, 0, 0, 0);
 		
-		// If item is not for today, allow ordering (future dates)
+		// If item is not for today, allow ordering
 		if (itemDateObj.getTime() !== today.getTime()) {
 			return true;
 		}
@@ -69,55 +70,67 @@ const canOrderMeal = (mealType, itemDate = null) => {
 	return now < deadlineTime;
 };
 
-// Helper function to format time remaining
-const getTimeRemainingMessage = (mealType) => {
-	const now = new Date();
-	const deadline = ORDER_DEADLINES[mealType];
-	const deadlineTime = new Date();
-	deadlineTime.setHours(deadline.hour, deadline.minute, 0, 0);
+// Helper function to get date for a specific day in current week
+const getDateForDay = (dayName) => {
+	const today = new Date();
+	today.setHours(0, 0, 0, 0);
 	
-	if (now >= deadlineTime) {
-		const nextDay = new Date(now);
-		nextDay.setDate(nextDay.getDate() + 1);
-		nextDay.setHours(0, 0, 0, 0);
-		
-		const hoursUntilTomorrow = Math.ceil((nextDay - now) / (1000 * 60 * 60));
-		return `Ordering closed. Opens again in ${hoursUntilTomorrow} hour${hoursUntilTomorrow !== 1 ? 's' : ''}`;
-	}
+	// Get day index (0 = Sunday, 1 = Monday, etc.)
+	const targetDayIndex = DAYS.indexOf(dayName);
+	const currentDayIndex = today.getDay();
 	
-	const diffMs = deadlineTime - now;
-	const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-	const diffMinutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+	// Calculate days difference
+	let daysDiff = targetDayIndex - currentDayIndex;
 	
-	if (diffHours > 0) {
-		return `Order closes in ${diffHours}h ${diffMinutes}m`;
-	}
-	return `Order closes in ${diffMinutes} minutes`;
+	// Create date object for the target day
+	const targetDate = new Date(today);
+	targetDate.setDate(targetDate.getDate() + daysDiff);
+	
+	return targetDate;
+};
+
+// Helper function to get start and end of current week
+const getWeekRange = () => {
+	const today = new Date();
+	today.setHours(0, 0, 0, 0);
+	
+	// Get start of week (Sunday)
+	const startOfWeek = new Date(today);
+	const day = today.getDay();
+	const diff = today.getDate() - day;
+	startOfWeek.setDate(diff);
+	
+	// Get end of week (Saturday)
+	const endOfWeek = new Date(startOfWeek);
+	endOfWeek.setDate(startOfWeek.getDate() + 6);
+	endOfWeek.setHours(23, 59, 59, 999);
+	
+	return { start: startOfWeek, end: endOfWeek };
 };
 
 // Helper function to get next 30 days
-function getNext30Days() {
-    const days = [];
-    const today = new Date();
-    const todayMs = today.getTime();
-    const dayInMs = 24 * 60 * 60 * 1000;
-    
-    for (let i = 0; i < 30; i++) {
-        const date = new Date(todayMs + (i * dayInMs));
-        days.push({
-            date: date,
-            dateString: date.toISOString().split('T')[0],
-            displayDate: date.toLocaleDateString('en-US', { 
-                weekday: 'short', 
-                month: 'short', 
-                day: 'numeric' 
-            }),
-            dayName: date.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase()
-        });
-    }
-    
-    return days;
-}
+const getNext30Days = () => {
+	const days = [];
+	const today = new Date();
+	today.setHours(0, 0, 0, 0);
+	
+	for (let i = 0; i < 30; i++) {
+		const date = new Date(today);
+		date.setDate(date.getDate() + i);
+		days.push({
+			date: date,
+			dateString: date.toISOString().split('T')[0],
+			displayDate: date.toLocaleDateString('en-US', { 
+				weekday: 'short', 
+				month: 'short', 
+				day: 'numeric' 
+			}),
+			dayName: date.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase()
+		});
+	}
+	
+	return days;
+};
 
 export default function KitchenProfile() {
 	const { id } = useParams();
@@ -125,11 +138,10 @@ export default function KitchenProfile() {
 	const [kitchen, setKitchen] = useState(null);
 	const [menuItems, setMenuItems] = useState([]);
 	const [loading, setLoading] = useState(true);
-	const [error, setError] = useState(null);
 	const [selectedItem, setSelectedItem] = useState(null);
 	const [showItemModal, setShowItemModal] = useState(false);
 	const [user, setUser] = useState(null);
-	const [currentTime, setCurrentTime] = useState(new Date()); // For real-time updates
+	const [currentTime, setCurrentTime] = useState(new Date());
 	
 	// Reviews state
 	const [reviews, setReviews] = useState([]);
@@ -143,7 +155,7 @@ export default function KitchenProfile() {
 	const [showSubscription, setShowSubscription] = useState(false);
 
 	// Menu view state
-	const [menuView, setMenuView] = useState('today'); // 'today', 'weekly', 'monthly'
+	const [menuView, setMenuView] = useState('today');
 	const [activeDay, setActiveDay] = useState(DAYS[new Date().getDay()]);
 
 	const [cart, setCart] = useState(() => {
@@ -155,7 +167,7 @@ export default function KitchenProfile() {
 	useEffect(() => {
 		const timer = setInterval(() => {
 			setCurrentTime(new Date());
-		}, 60000); // Update every minute
+		}, 60000);
 		
 		return () => clearInterval(timer);
 	}, []);
@@ -194,7 +206,7 @@ export default function KitchenProfile() {
 				setMenuItems(menuRes.data.data || []);
 				setReviews(reviewsRes.data || []);
 			} catch (err) {
-				setError(err.message || 'Failed to fetch kitchen data');
+				console.error('Failed to fetch data:', err);
 			} finally {
 				setLoading(false);
 			}
@@ -203,14 +215,12 @@ export default function KitchenProfile() {
 	}, [id]);
 
 	const addToCart = (item) => {
-		// Check if ordering is allowed for this meal type and date
 		if (!canOrderMeal(item.mealType, item.date)) {
 			const deadline = ORDER_DEADLINES[item.mealType];
-			alert(`Sorry! ${item.mealType.charAt(0).toUpperCase() + item.mealType.slice(1)} ordering is closed after ${deadline.label}. Please order in advance for tomorrow.`);
+			alert(`Sorry! ${item.mealType.charAt(0).toUpperCase() + item.mealType.slice(1)} ordering is closed after ${deadline.label}.`);
 			return;
 		}
 		
-		// Get the item's date from the menu item
 		const itemDate = new Date(item.date);
 		
 		const itemWithDelivery = {
@@ -234,7 +244,7 @@ export default function KitchenProfile() {
 		}
 
 		setCart((prev) => [...prev, itemWithDelivery]);
-		alert(`${item.name} added to cart for ${itemDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}!`);
+		alert(`${item.name} added to cart!`);
 	};
 
 	const submitReview = async () => {
@@ -252,7 +262,7 @@ export default function KitchenProfile() {
 			setReviewComment('');
 			setReviewRating(5);
 			setShowReviewForm(false);
-			alert('Review submitted and is now pending admin approval!');
+			alert('Review submitted!');
 		} catch (err) {
 			console.error(err);
 			alert(err.response?.data?.message || 'Failed to submit review');
@@ -267,53 +277,64 @@ export default function KitchenProfile() {
 		return parts.length ? parts.join(', ') : 'Address not available';
 	};
 
-	// Group menu items based on view
+	// Get today's items
 	const getTodayItems = () => {
 		const today = new Date();
 		today.setHours(0, 0, 0, 0);
-		
-		// Format today's date string in local timezone
-		const year = today.getFullYear();
-		const month = String(today.getMonth() + 1).padStart(2, '0');
-		const day = String(today.getDate()).padStart(2, '0');
-		const todayString = `${year}-${month}-${day}`;
+		const todayString = today.toISOString().split('T')[0];
 		
 		return menuItems.filter(item => {
 			if (!item.date) return false;
-			
 			const itemDate = new Date(item.date);
 			itemDate.setHours(0, 0, 0, 0);
-			
-			// Format item date in local timezone
-			const itemYear = itemDate.getFullYear();
-			const itemMonth = String(itemDate.getMonth() + 1).padStart(2, '0');
-			const itemDay = String(itemDate.getDate()).padStart(2, '0');
-			const itemDateString = `${itemYear}-${itemMonth}-${itemDay}`;
-			
+			const itemDateString = itemDate.toISOString().split('T')[0];
 			return itemDateString === todayString;
 		});
 	};
 
+	// Get weekly items (only current week)
 	const getWeeklyItems = () => {
-		return DAYS.reduce((acc, day) => {
-			acc[day] = {
-				lunch: menuItems.filter(
-					(item) => item.day === day && item.mealType === 'lunch'
-				),
-				dinner: menuItems.filter(
-					(item) => item.day === day && item.mealType === 'dinner'
-				),
+		const { start: weekStart, end: weekEnd } = getWeekRange();
+		
+		// Filter items for current week
+		const currentWeekItems = menuItems.filter(item => {
+			if (!item.date) return false;
+			const itemDate = new Date(item.date);
+			return itemDate >= weekStart && itemDate <= weekEnd;
+		});
+		
+		// Group by day
+		const grouped = {};
+		DAYS.forEach(day => {
+			const dayDate = getDateForDay(day);
+			const dateString = dayDate.toISOString().split('T')[0];
+			
+			// Get items for this specific date
+			const itemsForDay = currentWeekItems.filter(item => {
+				const itemDate = new Date(item.date);
+				const itemDateString = itemDate.toISOString().split('T')[0];
+				return itemDateString === dateString;
+			});
+			
+			grouped[day] = {
+				lunch: itemsForDay.filter(item => item.mealType === 'lunch'),
+				dinner: itemsForDay.filter(item => item.mealType === 'dinner'),
+				date: dayDate,
+				dateString: dateString
 			};
-			return acc;
-		}, {});
+		});
+		
+		return grouped;
 	};
 
+	// Get monthly items
 	const getMonthlyItems = () => {
 		const next30Days = getNext30Days();
 		const itemsByDate = {};
 		
 		next30Days.forEach(day => {
 			itemsByDate[day.dateString] = menuItems.filter(item => {
+				if (!item.date) return false;
 				const itemDate = new Date(item.date).toISOString().split('T')[0];
 				return itemDate === day.dateString;
 			});
@@ -368,8 +389,6 @@ export default function KitchenProfile() {
 							<span className="flex items-center gap-2 bg-black/20 backdrop-blur-sm px-3 py-1.5 rounded-lg"><FaTruck className="text-violet-400" /> Free Delivery</span>
 						</div>
 					</div>
-					
-					
 				</div>
 			</div>
 
@@ -379,7 +398,7 @@ export default function KitchenProfile() {
 				<div className="mb-12 max-w-3xl">
 					<h2 className="text-xs font-bold text-stone-400 uppercase tracking-widest mb-3">About the Kitchen</h2>
 					<p className="text-stone-700 leading-relaxed text-xl font-light">
-						{kitchen.about || "Welcome to our kitchen! We prepare fresh, healthy, and delicious home-cooked meals daily. Using only the finest ingredients, we ensure every bite feels like home."}
+						{kitchen.about || "Welcome to our kitchen! We prepare fresh, healthy, and delicious home-cooked meals daily."}
 					</p>
 				</div>
 
@@ -402,11 +421,7 @@ export default function KitchenProfile() {
 									{canOrderMeal('lunch') ? 'Open' : 'Closed'}
 								</span>
 							</div>
-							<p className="text-sm text-stone-600 mt-1">
-								Closes at {ORDER_DEADLINES.lunch.label}
-								<br />
-								<span className="text-xs font-medium">{getTimeRemainingMessage('lunch')}</span>
-							</p>
+							<p className="text-sm text-stone-600 mt-1">Closes at {ORDER_DEADLINES.lunch.label}</p>
 						</div>
 						<div className={`p-3 rounded-lg border ${canOrderMeal('dinner') ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50'}`}>
 							<div className="flex justify-between items-center">
@@ -415,16 +430,12 @@ export default function KitchenProfile() {
 									{canOrderMeal('dinner') ? 'Open' : 'Closed'}
 								</span>
 							</div>
-							<p className="text-sm text-stone-600 mt-1">
-								Closes at {ORDER_DEADLINES.dinner.label}
-								<br />
-								<span className="text-xs font-medium">{getTimeRemainingMessage('dinner')}</span>
-							</p>
+							<p className="text-sm text-stone-600 mt-1">Closes at {ORDER_DEADLINES.dinner.label}</p>
 						</div>
 					</div>
 				</div>
 
-				{/* Reviews & Subscription Layout */}
+				{/* Reviews & Subscription */}
 				<div className="mb-12 space-y-8">
 					
 					{/* Reviews Section */}
@@ -609,41 +620,21 @@ export default function KitchenProfile() {
 								}}
 								addToCart={addToCart}
 								isCustomer={user?.role === 'customer'}
-								currentTime={currentTime}
 							/>
 						)}
 
 						{menuView === 'weekly' && (
-							<>
-								<div className="flex justify-center mb-8">
-									<div className="inline-flex bg-stone-100 p-1.5 rounded-full shadow-inner overflow-x-auto max-w-full">
-										{DAYS.map((day) => (
-											<button
-												key={day}
-												onClick={() => setActiveDay(day)}
-												className={`px-6 py-2.5 rounded-full text-sm font-bold capitalize whitespace-nowrap transition-all duration-300 ${
-													activeDay === day
-														? 'bg-white text-violet-700 shadow-md ring-1 ring-black/5'
-														: 'text-stone-500 hover:text-stone-700 hover:bg-stone-200/50'
-												}`}
-											>
-												{day}
-											</button>
-										))}
-									</div>
-								</div>
-								<DayMenu 
-									day={activeDay}
-									items={getWeeklyItems()[activeDay]}
-									openItemModal={(item) => {
-										setSelectedItem(item);
-										setShowItemModal(true);
-									}}
-									addToCart={addToCart}
-									isCustomer={user?.role === 'customer'}
-									currentTime={currentTime}
-								/>
-							</>
+							<WeeklyMenu 
+								weeklyData={getWeeklyItems()}
+								activeDay={activeDay}
+								setActiveDay={setActiveDay}
+								openItemModal={(item) => {
+									setSelectedItem(item);
+									setShowItemModal(true);
+								}}
+								addToCart={addToCart}
+								isCustomer={user?.role === 'customer'}
+							/>
 						)}
 
 						{menuView === 'monthly' && (
@@ -655,7 +646,6 @@ export default function KitchenProfile() {
 								}}
 								addToCart={addToCart}
 								isCustomer={user?.role === 'customer'}
-								currentTime={currentTime}
 							/>
 						)}
 					</div>
@@ -669,7 +659,6 @@ export default function KitchenProfile() {
 					closeModal={() => setShowItemModal(false)}
 					addToCart={addToCart}
 					isCustomer={user?.role === 'customer'}
-					currentTime={currentTime}
 				/>
 			)}
 
@@ -678,12 +667,11 @@ export default function KitchenProfile() {
 	);
 }
 
-// Today Menu Component (Updated with time restrictions)
-const TodayMenu = ({ items, openItemModal, addToCart, isCustomer, currentTime }) => {
+// Today Menu Component
+const TodayMenu = ({ items, openItemModal, addToCart, isCustomer }) => {
 	const lunchItems = items.filter(item => item.mealType === 'lunch');
 	const dinnerItems = items.filter(item => item.mealType === 'dinner');
 	
-	// Check if ordering is allowed for today's meals
 	const canOrderLunch = canOrderMeal('lunch');
 	const canOrderDinner = canOrderMeal('dinner');
 
@@ -774,32 +762,92 @@ const TodayMenu = ({ items, openItemModal, addToCart, isCustomer, currentTime })
 	);
 };
 
-// Day Menu Component (for Weekly view) - Updated
-const DayMenu = ({ day, items, openItemModal, addToCart, isCustomer, currentTime }) => {
-	const hasLunch = items.lunch.length > 0;
-	const hasDinner = items.dinner.length > 0;
-	
-	// Check if the selected day is today
+// Weekly Menu Component
+const WeeklyMenu = ({ weeklyData, activeDay, setActiveDay, openItemModal, addToCart, isCustomer }) => {
 	const today = new Date();
 	const todayDayName = DAYS[today.getDay()];
-	const isToday = day === todayDayName;
 	
-	// For today's items, apply time restrictions
-	const canOrderLunch = isToday ? canOrderMeal('lunch') : true;
-	const canOrderDinner = isToday ? canOrderMeal('dinner') : true;
+	return (
+		<>
+			{/* Day Selector with Dates */}
+			<div className="flex justify-center mb-8">
+				<div className="inline-flex bg-stone-100 p-1.5 rounded-full shadow-inner overflow-x-auto max-w-full">
+					{DAYS.map((day) => {
+						const dayData = weeklyData[day];
+						const isToday = day === todayDayName;
+						const dateDisplay = dayData?.date 
+							? dayData.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+							: '';
+						
+						return (
+							<button
+								key={day}
+								onClick={() => setActiveDay(day)}
+								className={`px-4 py-2.5 rounded-full text-sm font-bold capitalize whitespace-nowrap transition-all duration-300 flex flex-col items-center ${
+									activeDay === day
+										? 'bg-white text-violet-700 shadow-md ring-1 ring-black/5'
+										: 'text-stone-500 hover:text-stone-700 hover:bg-stone-200/50'
+								}`}
+							>
+								<span>{day.slice(0, 3)}</span>
+								<span className={`text-xs mt-1 ${isToday ? 'text-violet-600 font-bold' : 'text-stone-400'}`}>
+									{dateDisplay}
+									{isToday && ' (Today)'}
+								</span>
+							</button>
+						);
+					})}
+				</div>
+			</div>
+			
+			{/* Day Menu */}
+			<DayMenu 
+				day={activeDay}
+				dayData={weeklyData[activeDay]}
+				openItemModal={openItemModal}
+				addToCart={addToCart}
+				isCustomer={isCustomer}
+			/>
+		</>
+	);
+};
 
-	if (!hasLunch && !hasDinner) {
+// Day Menu Component
+const DayMenu = ({ day, dayData, openItemModal, addToCart, isCustomer }) => {
+	if (!dayData) {
 		return (
 			<div className="flex flex-col items-center justify-center py-24 bg-white rounded-3xl border border-stone-200 border-dashed mx-4">
 				<div className="w-20 h-20 bg-stone-100 rounded-full flex items-center justify-center text-4xl mb-4 opacity-50">👨‍🍳</div>
-				<h3 className="text-xl font-bold text-stone-400">The chef is resting</h3>
+				<h3 className="text-xl font-bold text-stone-400">No menu available</h3>
 				<p className="text-stone-400 text-sm mt-1">No meals scheduled for {day}</p>
 			</div>
 		);
 	}
 
+	const { lunch, dinner, date } = dayData;
+	const hasLunch = lunch.length > 0;
+	const hasDinner = dinner.length > 0;
+	const isToday = date.toDateString() === new Date().toDateString();
+	
+	const canOrderLunch = isToday ? canOrderMeal('lunch') : true;
+	const canOrderDinner = isToday ? canOrderMeal('dinner') : true;
+
 	return (
 		<div className="space-y-16 animate-in fade-in duration-500">
+			{/* Day header with date */}
+			<div className="text-center mb-8">
+				<h2 className="text-3xl font-bold text-stone-800 capitalize">{day}</h2>
+				<p className="text-stone-600 mt-2">
+					{date.toLocaleDateString('en-US', { 
+						weekday: 'long', 
+						month: 'long', 
+						day: 'numeric',
+						year: 'numeric'
+					})}
+					{isToday && <span className="ml-2 text-sm bg-violet-100 text-violet-700 px-2 py-1 rounded-full">Today</span>}
+				</p>
+			</div>
+
 			{hasLunch && (
 				<div>
 					<div className="flex items-center gap-4 mb-8">
@@ -814,7 +862,7 @@ const DayMenu = ({ day, items, openItemModal, addToCart, isCustomer, currentTime
 						)}
 					</div>
 					<div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-						{items.lunch.map((item) => (
+						{lunch.map((item) => (
 							<MenuItemCard
 								key={item._id}
 								item={item}
@@ -850,7 +898,7 @@ const DayMenu = ({ day, items, openItemModal, addToCart, isCustomer, currentTime
 						)}
 					</div>
 					<div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-						{items.dinner.map((item) => (
+						{dinner.map((item) => (
 							<MenuItemCard
 								key={item._id}
 								item={item}
@@ -875,8 +923,8 @@ const DayMenu = ({ day, items, openItemModal, addToCart, isCustomer, currentTime
 	);
 };
 
-// Monthly Menu Component - Updated
-const MonthlyMenu = ({ data, openItemModal, addToCart, isCustomer, currentTime }) => {
+// Monthly Menu Component
+const MonthlyMenu = ({ data, openItemModal, addToCart, isCustomer }) => {
 	const { next30Days, itemsByDate } = data;
 
 	return (
@@ -886,14 +934,7 @@ const MonthlyMenu = ({ data, openItemModal, addToCart, isCustomer, currentTime }
 				const lunchItems = dayItems.filter(item => item.mealType === 'lunch');
 				const dinnerItems = dayItems.filter(item => item.mealType === 'dinner');
 				
-				// Check if this day is today
-				const today = new Date();
-				today.setHours(0, 0, 0, 0);
-				const dayDate = new Date(day.dateString);
-				dayDate.setHours(0, 0, 0, 0);
-				const isToday = dayDate.getTime() === today.getTime();
-				
-				// Apply time restrictions only for today
+				const isToday = day.dateString === new Date().toISOString().split('T')[0];
 				const canOrderLunch = isToday ? canOrderMeal('lunch') : true;
 				const canOrderDinner = isToday ? canOrderMeal('dinner') : true;
 
@@ -927,41 +968,14 @@ const MonthlyMenu = ({ data, openItemModal, addToCart, isCustomer, currentTime }
 										</div>
 										<div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
 											{lunchItems.map(item => (
-												<div key={item._id} className="flex gap-3 border border-stone-100 rounded-lg p-3 hover:shadow-sm transition cursor-pointer" onClick={() => openItemModal(item)}>
-													<img
-														src={item.imageUrl || FALLBACK_IMAGE}
-														alt={item.name}
-														className="w-16 h-16 object-cover rounded flex-shrink-0"
-														onError={(e) => { e.currentTarget.src = FALLBACK_IMAGE; }}
-													/>
-													<div className="flex-1 min-w-0">
-														<div className="font-medium text-sm truncate">{item.name}</div>
-														<div className="text-xs text-stone-500 line-clamp-1">{item.description}</div>
-														<div className="flex items-center justify-between mt-1">
-															<span className="text-sm font-bold text-violet-700">{item.price} ৳</span>
-															{isCustomer && (
-																<button
-																	onClick={(e) => {
-																		e.stopPropagation();
-																		if (canOrderLunch) {
-																			addToCart(item);
-																		} else {
-																			alert(`Lunch ordering is closed for today after ${ORDER_DEADLINES.lunch.label}. You can order for future dates.`);
-																		}
-																	}}
-																	className={`px-2 py-1 rounded text-xs font-semibold transition ${
-																		canOrderLunch 
-																			? 'bg-violet-100 text-violet-700 hover:bg-violet-200' 
-																			: 'bg-gray-100 text-gray-400 cursor-not-allowed'
-																	}`}
-																	disabled={!canOrderLunch}
-																>
-																	{canOrderLunch ? 'Add' : 'Closed'}
-																</button>
-															)}
-														</div>
-													</div>
-												</div>
+												<MonthlyMenuItem
+													key={item._id}
+													item={item}
+													openItemModal={() => openItemModal(item)}
+													addToCart={() => addToCart(item)}
+													isCustomer={isCustomer}
+													canOrder={canOrderLunch}
+												/>
 											))}
 										</div>
 									</div>
@@ -978,41 +992,14 @@ const MonthlyMenu = ({ data, openItemModal, addToCart, isCustomer, currentTime }
 										</div>
 										<div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
 											{dinnerItems.map(item => (
-												<div key={item._id} className="flex gap-3 border border-stone-100 rounded-lg p-3 hover:shadow-sm transition cursor-pointer" onClick={() => openItemModal(item)}>
-													<img
-														src={item.imageUrl || FALLBACK_IMAGE}
-														alt={item.name}
-														className="w-16 h-16 object-cover rounded flex-shrink-0"
-														onError={(e) => { e.currentTarget.src = FALLBACK_IMAGE; }}
-													/>
-													<div className="flex-1 min-w-0">
-														<div className="font-medium text-sm truncate">{item.name}</div>
-														<div className="text-xs text-stone-500 line-clamp-1">{item.description}</div>
-														<div className="flex items-center justify-between mt-1">
-															<span className="text-sm font-bold text-violet-700">{item.price} ৳</span>
-															{isCustomer && (
-																<button
-																	onClick={(e) => {
-																		e.stopPropagation();
-																		if (canOrderDinner) {
-																			addToCart(item);
-																		} else {
-																			alert(`Dinner ordering is closed for today after ${ORDER_DEADLINES.dinner.label}. You can order for future dates.`);
-																		}
-																	}}
-																	className={`px-2 py-1 rounded text-xs font-semibold transition ${
-																		canOrderDinner 
-																			? 'bg-violet-100 text-violet-700 hover:bg-violet-200' 
-																			: 'bg-gray-100 text-gray-400 cursor-not-allowed'
-																	}`}
-																	disabled={!canOrderDinner}
-																>
-																	{canOrderDinner ? 'Add' : 'Closed'}
-																</button>
-															)}
-														</div>
-													</div>
-												</div>
+												<MonthlyMenuItem
+													key={item._id}
+													item={item}
+													openItemModal={() => openItemModal(item)}
+													addToCart={() => addToCart(item)}
+													isCustomer={isCustomer}
+													canOrder={canOrderDinner}
+												/>
 											))}
 										</div>
 									</div>
@@ -1026,9 +1013,55 @@ const MonthlyMenu = ({ data, openItemModal, addToCart, isCustomer, currentTime }
 	);
 };
 
-// Item Card Component (Updated with time restrictions)
+// Monthly Menu Item Component
+const MonthlyMenuItem = ({ item, openItemModal, addToCart, isCustomer, canOrder }) => {
+	return (
+		<div className="flex gap-3 border border-stone-100 rounded-lg p-3 hover:shadow-sm transition cursor-pointer" onClick={openItemModal}>
+			<img
+				src={item.imageUrl || FALLBACK_IMAGE}
+				alt={item.name}
+				className="w-16 h-16 object-cover rounded flex-shrink-0"
+				onError={(e) => { e.currentTarget.src = FALLBACK_IMAGE; }}
+			/>
+			<div className="flex-1 min-w-0">
+				<div className="font-medium text-sm truncate">{item.name}</div>
+				<div className="text-xs text-stone-500 line-clamp-1">{item.description}</div>
+				<div className="flex items-center justify-between mt-1">
+					<span className="text-sm font-bold text-violet-700">{item.price} ৳</span>
+					{isCustomer && (
+						<button
+							onClick={(e) => {
+								e.stopPropagation();
+								if (canOrder) {
+									addToCart(item);
+								} else {
+									const deadline = ORDER_DEADLINES[item.mealType];
+									alert(`${item.mealType.charAt(0).toUpperCase() + item.mealType.slice(1)} ordering is closed for today after ${deadline.label}. You can order for future dates.`);
+								}
+							}}
+							className={`px-2 py-1 rounded text-xs font-semibold transition ${
+								canOrder 
+									? 'bg-violet-100 text-violet-700 hover:bg-violet-200' 
+									: 'bg-gray-100 text-gray-400 cursor-not-allowed'
+							}`}
+							disabled={!canOrder}
+						>
+							{canOrder ? 'Add' : 'Closed'}
+						</button>
+					)}
+				</div>
+			</div>
+		</div>
+	);
+};
+
+// Menu Item Card Component
 const MenuItemCard = ({ item, isCustomer, onAdd, onClick, canOrder = true }) => {
-	const isOrderable = isCustomer && canOrder;
+	const itemDate = new Date(item.date);
+	const dateDisplay = itemDate.toLocaleDateString('en-US', { 
+		month: 'short', 
+		day: 'numeric' 
+	});
 
 	return (
 		<div 
@@ -1050,7 +1083,10 @@ const MenuItemCard = ({ item, isCustomer, onAdd, onClick, canOrder = true }) => 
 				<div className="flex-1 flex flex-col justify-between min-w-0 py-1">
 					<div>
 						<div className="flex justify-between items-start mb-1">
-							<h4 className="font-bold text-stone-800 group-hover:text-violet-700 transition line-clamp-1 text-lg">{item.name}</h4>
+							<div>
+								<h4 className="font-bold text-stone-800 group-hover:text-violet-700 transition line-clamp-1 text-lg">{item.name}</h4>
+								<p className="text-xs text-stone-500 mt-1">{dateDisplay}</p>
+							</div>
 							<span className="font-bold text-violet-600 shrink-0 ml-2 bg-violet-50 px-2 py-0.5 rounded-lg">{item.price} ৳</span>
 						</div>
 						<div className="flex flex-wrap gap-1 mb-2">
@@ -1072,7 +1108,7 @@ const MenuItemCard = ({ item, isCustomer, onAdd, onClick, canOrder = true }) => 
 								onAdd();
 							} else {
 								const deadline = ORDER_DEADLINES[item.mealType];
-								alert(`Sorry! ${item.mealType} ordering is closed after ${deadline.label}. Please order in advance for tomorrow.`);
+								alert(`Sorry! ${item.mealType} ordering is closed after ${deadline.label}.`);
 							}
 						}}
 						className={`absolute bottom-4 right-4 w-10 h-10 rounded-full flex items-center justify-center transition-all shadow-sm group-hover:scale-110 ${
@@ -1100,11 +1136,10 @@ const MenuItemCard = ({ item, isCustomer, onAdd, onClick, canOrder = true }) => 
 	);
 };
 
-// Item Modal Component (Updated with time restrictions)
-const ItemModal = ({ item, isCustomer, addToCart, closeModal, currentTime }) => {
+// Item Modal Component
+const ItemModal = ({ item, isCustomer, addToCart, closeModal }) => {
 	if (!item) return null;
 	
-	// Check if ordering is allowed for this item
 	const itemDate = new Date(item.date);
 	const today = new Date();
 	today.setHours(0, 0, 0, 0);
@@ -1113,8 +1148,8 @@ const ItemModal = ({ item, isCustomer, addToCart, closeModal, currentTime }) => 
 	const canOrder = isToday ? canOrderMeal(item.mealType, item.date) : true;
 
 	return (
-		<div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-			<div className="bg-white rounded-2xl w-full max-w-md overflow-hidden">
+		<div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50" onClick={closeModal}>
+			<div className="bg-white rounded-2xl w-full max-w-md overflow-hidden" onClick={e => e.stopPropagation()}>
 				<div className="relative">
 					<img
 						src={item.imageUrl || FALLBACK_IMAGE}
@@ -1177,7 +1212,6 @@ const ItemModal = ({ item, isCustomer, addToCart, closeModal, currentTime }) => 
 							</div>
 							<p className="text-red-600 text-sm">
 								{item.mealType.charAt(0).toUpperCase() + item.mealType.slice(1)} ordering is closed after {ORDER_DEADLINES[item.mealType].label} for today.
-								You can still order this meal for future dates.
 							</p>
 						</div>
 					)}
@@ -1189,7 +1223,7 @@ const ItemModal = ({ item, isCustomer, addToCart, closeModal, currentTime }) => 
 									addToCart(item);
 									closeModal();
 								} else {
-									alert(`Sorry! ${item.mealType} ordering is closed for today after ${ORDER_DEADLINES[item.mealType].label}. You can order for future dates.`);
+									alert(`Sorry! ${item.mealType} ordering is closed for today after ${ORDER_DEADLINES[item.mealType].label}.`);
 								}
 							}}
 							className={`w-full py-4 rounded-xl font-bold text-lg transition-all transform hover:-translate-y-0.5 flex items-center justify-center gap-2 ${
@@ -1214,9 +1248,6 @@ const ItemModal = ({ item, isCustomer, addToCart, closeModal, currentTime }) => 
 		</div>
 	);
 };
-
-
-
 
 
 

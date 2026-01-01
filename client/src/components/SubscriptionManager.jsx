@@ -4,7 +4,65 @@ import axiosInstance from '../api/axios';
 
 const DAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const LUNCH_CUTOFF_HOUR = 10;
+const DINNER_CUTOFF_HOUR = 16;
+const MONTHLY_DISCOUNT_PERCENT = 10;
+const WEEKLY_MIN_MEALS = 2;
+const MONTHLY_MIN_MEALS = 4;
 
+const getCurrentDate = () => {
+  const now = new Date();
+  return {
+    date: now,
+    year: now.getFullYear(),
+    month: now.getMonth(),
+    day: now.getDate(),
+    hour: now.getHours(),
+    minute: now.getMinutes()
+  };
+};
+
+const isToday = (dateString) => {
+  const current = getCurrentDate();
+  const currentDateStr = `${current.year}-${String(current.month + 1).padStart(2, '0')}-${String(current.day).padStart(2, '0')}`;
+  return currentDateStr === dateString;
+};
+
+const getDateString = (date) => {
+  const d = new Date(date);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+const isMealSelectionAllowed = (dateString, mealType) => {
+  const current = getCurrentDate();
+  
+  // Get today's date at midnight
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  
+  // Get meal date at midnight
+  const mealDate = new Date(dateString);
+  mealDate.setHours(0, 0, 0, 0);
+  
+  // If meal date is in the past
+  if (mealDate < today) {
+    return false;
+  }
+  
+  // If meal date is today, check cutoff times
+  if (mealDate.getTime() === today.getTime()) {
+    if (mealType === 'lunch' && current.hour >= LUNCH_CUTOFF_HOUR) {
+      return false;
+    }
+    if (mealType === 'dinner' && current.hour >= DINNER_CUTOFF_HOUR) {
+      return false;
+    }
+  }
+  
+  return true;
+};
+
+// Main Component
 export default function SubscriptionManager({ restaurantId: propRestaurantId }) {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -15,10 +73,24 @@ export default function SubscriptionManager({ restaurantId: propRestaurantId }) 
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedMeals, setSelectedMeals] = useState({});
-  const [isRepeating, setIsRepeating] = useState(true);
+  const [planType, setPlanType] = useState('weekly');
   const [creating, setCreating] = useState(false);
-  const [showPauseModal, setShowPauseModal] = useState(false);
-  const [subscriptionToPause, setSubscriptionToPause] = useState(null);
+  const [currentWeekStart, setCurrentWeekStart] = useState(() => {
+    const current = getCurrentDate();
+    const today = new Date(current.year, current.month, current.day);
+    const day = today.getDay();
+    const diff = -day;
+    const sunday = new Date(today);
+    sunday.setDate(sunday.getDate() + diff);
+    return sunday;
+  });
+  const [currentMonth, setCurrentMonth] = useState(() => {
+    const current = getCurrentDate();
+    return {
+      year: current.year,
+      month: current.month
+    };
+  });
 
   useEffect(() => {
     fetchSubscriptions();
@@ -40,9 +112,13 @@ export default function SubscriptionManager({ restaurantId: propRestaurantId }) 
     try {
       setLoading(true);
       const { data } = await axiosInstance.get('/api/subscriptions');
+      // Filter to only show active subscriptions (not cancelled)
       const visibleSubs = restaurantId 
-        ? (data.data || []).filter(sub => sub.restaurantId._id === restaurantId)
-        : (data.data || []);
+        ? (data.data || []).filter(sub => 
+            (sub.restaurantId?._id === restaurantId || sub.restaurantId === restaurantId) &&
+            sub.status !== 'cancelled'
+          )
+        : (data.data || []).filter(sub => sub.status !== 'cancelled');
         
       setSubscriptions(visibleSubs);
     } catch (error) {
@@ -52,90 +128,315 @@ export default function SubscriptionManager({ restaurantId: propRestaurantId }) 
     }
   };
 
-  const getDaysToInclude = () => {
-    const today = new Date().getDay();
-    const startDay = today === 0 ? 1 : (today + 1) % 7;
-    const daysToInclude = [];
-    const daysUntilSaturday = (6 - startDay + 7) % 7 + 1;
+  const getDaysForPlan = () => {
+    const days = [];
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
     
-    for (let i = 0; i < daysUntilSaturday; i++) {
-      const dayIndex = (startDay + i) % 7;
-      daysToInclude.push(DAYS[dayIndex]);
+    if (planType === 'weekly') {
+      const weekStart = new Date(currentWeekStart);
+      
+      const menuByDate = {};
+      menuItems.forEach(item => {
+        const itemDate = item.date ? new Date(item.date) : new Date();
+        const dateString = getDateString(itemDate);
+        
+        if (!menuByDate[dateString]) {
+          menuByDate[dateString] = { lunch: [], dinner: [] };
+        }
+        
+        if (item.mealType === 'lunch') {
+          menuByDate[dateString].lunch.push(item);
+        } else if (item.mealType === 'dinner') {
+          menuByDate[dateString].dinner.push(item);
+        }
+      });
+      
+      for (let i = 0; i < 7; i++) {
+        const date = new Date(weekStart);
+        date.setDate(date.getDate() + i);
+        const dateString = getDateString(date);
+        
+        // Skip past dates
+        const dateAtMidnight = new Date(date);
+        dateAtMidnight.setHours(0, 0, 0, 0);
+        if (dateAtMidnight < today) continue;
+        
+        const dayIndex = date.getDay();
+        const dayName = DAYS[dayIndex];
+        const menuForDate = menuByDate[dateString] || { lunch: [], dinner: [] };
+        
+        days.push({
+          date: new Date(date),
+          dateString,
+          day: dayName,
+          dayName: DAY_NAMES[dayIndex],
+          dateDisplay: date.toLocaleDateString('en-US', { 
+            weekday: 'short', 
+            month: 'short', 
+            day: 'numeric' 
+          }),
+          isToday: isToday(dateString),
+          menuItems: menuForDate
+        });
+      }
+    } else {
+      const { year, month } = currentMonth;
+      const firstDay = new Date(year, month, 1);
+      const lastDay = new Date(year, month + 1, 0);
+      
+      const menuByDate = {};
+      menuItems.forEach(item => {
+        const itemDate = item.date ? new Date(item.date) : new Date();
+        const dateString = getDateString(itemDate);
+        
+        if (!menuByDate[dateString]) {
+          menuByDate[dateString] = { lunch: [], dinner: [] };
+        }
+        
+        if (item.mealType === 'lunch') {
+          menuByDate[dateString].lunch.push(item);
+        } else if (item.mealType === 'dinner') {
+          menuByDate[dateString].dinner.push(item);
+        }
+      });
+      
+      const startDate = new Date(Math.max(firstDay.getTime(), today.getTime()));
+      for (let date = new Date(startDate); date <= lastDay; date.setDate(date.getDate() + 1)) {
+        const dateString = getDateString(date);
+        const dayIndex = date.getDay();
+        const dayName = DAYS[dayIndex];
+        
+        const menuForDate = menuByDate[dateString] || { lunch: [], dinner: [] };
+        
+        days.push({
+          date: new Date(date),
+          dateString,
+          day: dayName,
+          dayName: DAY_NAMES[dayIndex],
+          dateDisplay: date.toLocaleDateString('en-US', { 
+            weekday: 'short', 
+            month: 'short', 
+            day: 'numeric' 
+          }),
+          isToday: isToday(dateString),
+          menuItems: menuForDate
+        });
+      }
     }
     
-    return daysToInclude;
+    return days;
   };
 
-  const handlePackageRestOfWeek = (mealType) => {
-    const packageMeals = {};
-    const daysToInclude = getDaysToInclude();
-    
-    daysToInclude.forEach(day => {
-      const key = `${day}_${mealType}`;
-      const items = menuItems.filter(item => item.day === day && item.mealType === mealType);
-      if (items.length > 0) {
-        packageMeals[key] = {
-          menuItemId: items[0]._id,
-          quantity: 1,
-        };
+  const planDays = getDaysForPlan();
+
+  const getTotalMealsQuantity = () => {
+    return Object.values(selectedMeals).reduce((sum, meal) => sum + (meal.quantity || 1), 0);
+  };
+
+  const meetsMinimumRequirements = () => {
+    const totalQuantity = getTotalMealsQuantity();
+    if (planType === 'weekly') {
+      return totalQuantity >= WEEKLY_MIN_MEALS;
+    } else {
+      return totalQuantity >= MONTHLY_MIN_MEALS;
+    }
+  };
+
+  const handleMealSelect = (dateString, day, mealType, menuItemId, isSelected) => {
+    if (!isMealSelectionAllowed(dateString, mealType)) {
+      const current = getCurrentDate();
+      const currentTime = `${current.hour.toString().padStart(2, '0')}:${current.minute.toString().padStart(2, '0')}`;
+      
+      if (isToday(dateString)) {
+        alert(`Cannot select ${mealType} for today - cutoff time has passed (${currentTime}).\nLunch cutoff: ${LUNCH_CUTOFF_HOUR}:00 AM\nDinner cutoff: ${DINNER_CUTOFF_HOUR}:00 PM`);
+      } else {
+        alert(`Cannot select ${mealType} for ${dateString} - date is in the past.`);
       }
-    });
+      return;
+    }
     
-    setSelectedMeals(packageMeals);
-    setShowCreateModal(true);
+    const key = `${dateString}_${mealType}_${menuItemId}`;
+    
+    setSelectedMeals(prev => {
+      const newSelected = { ...prev };
+      
+      if (isSelected) {
+        const menuItem = menuItems.find(item => item._id === menuItemId);
+        if (!menuItem) return prev;
+        
+        newSelected[key] = {
+          date: dateString,
+          day,
+          mealType,
+          menuItemId,
+          quantity: 1,
+          price: menuItem.price,
+          menuItemName: menuItem.name,
+          dateDisplay: new Date(dateString).toLocaleDateString('en-US', { 
+            month: 'short', 
+            day: 'numeric' 
+          })
+        };
+      } else {
+        delete newSelected[key];
+      }
+      
+      return newSelected;
+    });
   };
 
-  const handleMealSelect = (day, mealType, menuItemId, quantity = 1) => {
-    const key = `${day}_${mealType}`;
+  const handleQuantityChange = (key, quantity) => {
+    if (quantity < 1) {
+      setSelectedMeals(prev => {
+        const newSelected = { ...prev };
+        delete newSelected[key];
+        return newSelected;
+      });
+      return;
+    }
+    
     setSelectedMeals(prev => ({
       ...prev,
-      [key]: { menuItemId, quantity },
+      [key]: {
+        ...prev[key],
+        quantity
+      }
     }));
   };
 
-  const handleQuantityChange = (day, mealType, quantity) => {
-    const key = `${day}_${mealType}`;
-    if (quantity < 1) {
-      const newSelected = { ...selectedMeals };
-      delete newSelected[key];
-      setSelectedMeals(newSelected);
-    } else {
-      setSelectedMeals(prev => ({
-        ...prev,
-        [key]: { ...prev[key], quantity },
-      }));
+  const selectAllMealsForDay = (dateString, day, mealType, mealItems) => {
+    if (!isMealSelectionAllowed(dateString, mealType)) {
+      alert(`Cannot select ${mealType} for this date - cutoff time has passed or date is in the past.`);
+      return;
     }
+    
+    setSelectedMeals(prev => {
+      const newSelected = { ...prev };
+      
+      if (mealItems.length > 0) {
+        const menuItem = mealItems[0];
+        const key = `${dateString}_${mealType}_${menuItem._id}`;
+        newSelected[key] = {
+          date: dateString,
+          day,
+          mealType,
+          menuItemId: menuItem._id,
+          quantity: 1,
+          price: menuItem.price,
+          menuItemName: menuItem.name,
+          dateDisplay: new Date(dateString).toLocaleDateString('en-US', { 
+            month: 'short', 
+            day: 'numeric' 
+          })
+        };
+      }
+      
+      return newSelected;
+    });
+  };
+
+  const clearAllMealsForDay = (dateString, mealType) => {
+    setSelectedMeals(prev => {
+      const newSelected = { ...prev };
+      
+      Object.keys(newSelected).forEach(key => {
+        if (key.startsWith(`${dateString}_${mealType}_`)) {
+          delete newSelected[key];
+        }
+      });
+      
+      return newSelected;
+    });
+  };
+
+  const selectAllMealsOfType = (mealType) => {
+    setSelectedMeals(prev => {
+      const newSelected = { ...prev };
+      
+      planDays.forEach(dayInfo => {
+        const mealsForDay = dayInfo.menuItems[mealType];
+        
+        if (mealsForDay.length > 0 && isMealSelectionAllowed(dayInfo.dateString, mealType)) {
+          const menuItem = mealsForDay[0];
+          const key = `${dayInfo.dateString}_${mealType}_${menuItem._id}`;
+          newSelected[key] = {
+            date: dayInfo.dateString,
+            day: dayInfo.day,
+            mealType,
+            menuItemId: menuItem._id,
+            quantity: 1,
+            price: menuItem.price,
+            menuItemName: menuItem.name,
+            dateDisplay: dayInfo.dateDisplay
+          };
+        }
+      });
+      
+      return newSelected;
+    });
   };
 
   const handleCreateSubscription = async () => {
-    const mealSelections = Object.entries(selectedMeals).map(([key, value]) => {
-      const [day, mealType] = key.split('_');
-      return {
-        day,
-        mealType,
-        menuItemId: value.menuItemId,
-        quantity: value.quantity || 1,
-      };
-    });
+    const totalQuantity = getTotalMealsQuantity();
+    if (planType === 'weekly' && totalQuantity < WEEKLY_MIN_MEALS) {
+      alert(`Weekly subscription requires at least ${WEEKLY_MIN_MEALS} meals. You have selected ${totalQuantity} meal${totalQuantity !== 1 ? 's' : ''}.`);
+      return;
+    }
+    if (planType === 'monthly' && totalQuantity < MONTHLY_MIN_MEALS) {
+      alert(`Monthly subscription requires at least ${MONTHLY_MIN_MEALS} meals. You have selected ${totalQuantity} meal${totalQuantity !== 1 ? 's' : ''}.`);
+      return;
+    }
+
+    const mealSelections = Object.values(selectedMeals).map(meal => ({
+      date: meal.date,
+      day: meal.day,
+      mealType: meal.mealType,
+      menuItemId: meal.menuItemId,
+      quantity: meal.quantity || 1,
+      price: meal.price,
+      itemName: meal.menuItemName,
+    }));
 
     if (mealSelections.length === 0) {
       alert('Please select at least one meal');
       return;
     }
 
+    const today = getDateString(new Date());
+    const current = getCurrentDate();
+    const todaySelections = mealSelections.filter(meal => meal.date === today);
+    
+    for (const meal of todaySelections) {
+      if (meal.mealType === 'lunch' && current.hour >= LUNCH_CUTOFF_HOUR) {
+        alert(`Cannot create subscription with today's lunch - cutoff time has passed (${LUNCH_CUTOFF_HOUR}:00 AM)`);
+        return;
+      }
+      if (meal.mealType === 'dinner' && current.hour >= DINNER_CUTOFF_HOUR) {
+        alert(`Cannot create subscription with today's dinner - cutoff time has passed (${DINNER_CUTOFF_HOUR}:00 PM)`);
+        return;
+      }
+    }
+
     try {
       setCreating(true);
+      
       await axiosInstance.post('/api/subscriptions', {
         restaurantId,
         mealSelections,
-        planType: 'weekly',
-        isRepeating,
+        planType,
+        startDate: new Date().toISOString(),
       });
+
+      const startText = todaySelections.length > 0 ? 'from today' : 'from tomorrow';
+      const discountText = planType === 'monthly' ? ` with ${MONTHLY_DISCOUNT_PERCENT}% discount applied` : '';
       
-      alert('Subscription created successfully!');
+      alert(`${planType === 'weekly' ? 'Weekly' : 'Monthly'} subscription created successfully${discountText}!\nStarting ${startText}.`);
+      
       setShowCreateModal(false);
       setSelectedMeals({});
       fetchSubscriptions();
+      
     } catch (error) {
       console.error('Failed to create subscription:', error);
       alert(error.response?.data?.message || 'Failed to create subscription');
@@ -144,63 +445,63 @@ export default function SubscriptionManager({ restaurantId: propRestaurantId }) 
     }
   };
 
-  const handlePauseClick = (subscription) => {
-    setSubscriptionToPause(subscription);
-    setShowPauseModal(true);
-  };
-
-  const handlePauseConfirm = async () => {
-    if (!subscriptionToPause) return;
-    
-    try {
-      await axiosInstance.patch(`/api/subscriptions/${subscriptionToPause._id}/pause`, {
-        cancelRemainingOrders: true
-      });
-      
-      alert('Subscription paused. Remaining orders for this week cancelled.');
-      setShowPauseModal(false);
-      setSubscriptionToPause(null);
-      fetchSubscriptions();
-    } catch (error) {
-      console.error('Failed to pause subscription:', error);
-      alert(error.response?.data?.message || 'Failed to pause subscription');
-    }
-  };
-
-  const handleResume = async (subscriptionId) => {
-    try {
-      await axiosInstance.patch(`/api/subscriptions/${subscriptionId}/resume`, {
-        recreateRemainingOrders: true
-      });
-      
-      alert('Subscription resumed! Orders recreated for remaining days.');
-      fetchSubscriptions();
-    } catch (error) {
-      console.error('Failed to resume subscription:', error);
-      alert(error.response?.data?.message || 'Failed to resume subscription');
-    }
-  };
-
   const handleCancel = async (subscriptionId) => {
-    if (!window.confirm('Cancel subscription? All future orders will be cancelled.')) return;
+    const confirmMessage = `Cancel this subscription?\n\n⚠️ All future orders will be cancelled\n💰 You will not be charged for cancelled orders\n✅ Today's orders (if any) will still be delivered`;
+    
+    if (!window.confirm(confirmMessage)) return;
     
     try {
       await axiosInstance.delete(`/api/subscriptions/${subscriptionId}`);
-      alert('Subscription cancelled successfully');
-      fetchSubscriptions();
+      alert('Subscription cancelled successfully!');
+      fetchSubscriptions(); // This will refresh and filter out cancelled subscriptions
     } catch (error) {
       console.error('Failed to cancel subscription:', error);
-      alert('Failed to cancel subscription');
+      alert(error.response?.data?.message || 'Failed to cancel subscription');
     }
   };
 
-  const groupedMenuItems = DAYS.reduce((acc, day) => {
-    acc[day] = {
-      lunch: menuItems.filter(item => item.day === day && item.mealType === 'lunch'),
-      dinner: menuItems.filter(item => item.day === day && item.mealType === 'dinner'),
-    };
-    return acc;
-  }, {});
+  const handlePrevWeek = () => {
+    const date = new Date(currentWeekStart);
+    date.setDate(date.getDate() - 7);
+    setCurrentWeekStart(date);
+  };
+
+  const handleNextWeek = () => {
+    const date = new Date(currentWeekStart);
+    date.setDate(date.getDate() + 7);
+    setCurrentWeekStart(date);
+  };
+
+  const handlePrevMonth = () => {
+    setCurrentMonth(prev => {
+      const newMonth = prev.month === 0 ? 11 : prev.month - 1;
+      const newYear = prev.month === 0 ? prev.year - 1 : prev.year;
+      return { year: newYear, month: newMonth };
+    });
+  };
+
+  const handleNextMonth = () => {
+    setCurrentMonth(prev => {
+      const newMonth = prev.month === 11 ? 0 : prev.month + 1;
+      const newYear = prev.month === 11 ? prev.year + 1 : prev.year;
+      return { year: newYear, month: newMonth };
+    });
+  };
+
+  const getPlanPeriodDisplay = () => {
+    if (planDays.length === 0) return '';
+    
+    if (planType === 'weekly') {
+      const firstDay = planDays[0];
+      const lastDay = planDays[planDays.length - 1];
+      return `${firstDay.dateDisplay} - ${lastDay.dateDisplay}`;
+    } else {
+      const monthName = new Date(currentMonth.year, currentMonth.month).toLocaleDateString('en-US', { 
+        month: 'long' 
+      });
+      return `${monthName} ${currentMonth.year}`;
+    }
+  };
 
   if (loading) {
     return (
@@ -210,22 +511,11 @@ export default function SubscriptionManager({ restaurantId: propRestaurantId }) 
     );
   }
 
-  const getCurrentDayMessage = () => {
-    const today = new Date().getDay();
-    const dayName = DAY_NAMES[today];
-    const nextDay = today === 0 ? 'Monday' : DAY_NAMES[(today + 1) % 7];
-    
-    if (today === 0) {
-      return `It's ${dayName}! Subscriptions will start from ${nextDay}.`;
-    }
-    return `Subscriptions will start from tomorrow (${nextDay}).`;
-  };
-
   return (
     <div className="bg-white rounded-lg shadow-md p-6">
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-2xl font-bold text-gray-900">
-          {restaurantId ? 'Manage Subscriptions' : 'Your Subscriptions'}
+          {restaurantId ? 'Manage Subscriptions' : 'Your Active Subscriptions'}
         </h2>
         {restaurantId && (
           <button
@@ -237,34 +527,18 @@ export default function SubscriptionManager({ restaurantId: propRestaurantId }) 
         )}
       </div>
 
-      {restaurantId && (
-        <div className="mb-6 p-4 bg-gradient-to-br from-violet-50 to-teal-50 rounded-lg border border-violet-100">
-          <div className="flex items-center gap-2 mb-2">
-            <span className="text-xl">⚡</span>
-            <h3 className="font-semibold text-gray-900">Quick Start</h3>
-          </div>
-          <p className="text-xs text-violet-700 mb-3">{getCurrentDayMessage()}</p>
-          <div className="flex gap-3">
-            <button
-              onClick={() => handlePackageRestOfWeek('lunch')}
-              className="flex-1 px-4 py-2.5 bg-gradient-to-r from-violet-500 to-violet-600 text-white rounded-lg hover:from-violet-600 hover:to-violet-700 transition font-semibold shadow-md"
-            >
-              ☀️ Add Lunch for Rest of Week
-            </button>
-            <button
-              onClick={() => handlePackageRestOfWeek('dinner')}
-              className="flex-1 px-4 py-2.5 bg-gradient-to-r from-indigo-500 to-indigo-600 text-white rounded-lg hover:from-indigo-600 hover:to-indigo-700 transition font-semibold shadow-md"
-            >
-              🌙 Add Dinner for Rest of Week
-            </button>
-          </div>
-        </div>
-      )}
-
       {subscriptions.length === 0 ? (
         <div className="text-center py-8 text-gray-500">
           {restaurantId ? (
-            <p>No subscriptions yet. Create one to get started!</p>
+            <div className="space-y-3">
+              <p>No active subscriptions yet. Create one to get started!</p>
+              <button
+                onClick={() => setShowCreateModal(true)}
+                className="px-4 py-2 bg-violet-100 text-violet-700 rounded-lg hover:bg-violet-200 font-semibold"
+              >
+                Create Subscription
+              </button>
+            </div>
           ) : (
             <div>
               <p className="mb-4">You don't have any active subscriptions.</p>
@@ -283,9 +557,7 @@ export default function SubscriptionManager({ restaurantId: propRestaurantId }) 
             <SubscriptionCard
               key={sub._id}
               subscription={sub}
-              onPause={() => handlePauseClick(sub)}
-              onResume={handleResume}
-              onCancel={handleCancel}
+              onCancel={() => handleCancel(sub._id)}
               navigate={navigate}
             />
           ))}
@@ -294,279 +566,644 @@ export default function SubscriptionManager({ restaurantId: propRestaurantId }) 
 
       {showCreateModal && (
         <CreateSubscriptionModal
-          groupedMenuItems={groupedMenuItems}
+          menuItems={menuItems}
           selectedMeals={selectedMeals}
-          isRepeating={isRepeating}
+          planType={planType}
+          planDays={planDays}
+          planPeriodDisplay={getPlanPeriodDisplay()}
+          onPlanTypeChange={setPlanType}
           onMealSelect={handleMealSelect}
           onQuantityChange={handleQuantityChange}
-          onRepeatingChange={setIsRepeating}
+          onSelectAllMealsForDay={selectAllMealsForDay}
+          onClearAllMealsForDay={clearAllMealsForDay}
+          onSelectAllMealsOfType={selectAllMealsOfType}
+          onClearAllSelections={() => setSelectedMeals({})}
+          onPrevPeriod={planType === 'weekly' ? handlePrevWeek : handlePrevMonth}
+          onNextPeriod={planType === 'weekly' ? handleNextWeek : handleNextMonth}
           onCreate={handleCreateSubscription}
           onClose={() => {
             setShowCreateModal(false);
             setSelectedMeals({});
+            setCurrentWeekStart(() => {
+              const current = getCurrentDate();
+              const today = new Date(current.year, current.month, current.day);
+              const day = today.getDay();
+              const diff = -day;
+              const sunday = new Date(today);
+              sunday.setDate(sunday.getDate() + diff);
+              return sunday;
+            });
+            setCurrentMonth(() => {
+              const current = getCurrentDate();
+              return {
+                year: current.year,
+                month: current.month
+              };
+            });
           }}
           creating={creating}
-        />
-      )}
-
-      {showPauseModal && subscriptionToPause && (
-        <PauseConfirmModal
-          subscription={subscriptionToPause}
-          onConfirm={handlePauseConfirm}
-          onCancel={() => {
-            setShowPauseModal(false);
-            setSubscriptionToPause(null);
-          }}
+          meetsMinimumRequirements={meetsMinimumRequirements()}
         />
       )}
     </div>
   );
 }
 
-function PauseConfirmModal({ subscription, onConfirm, onCancel }) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onCancel}>
-      <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6" onClick={e => e.stopPropagation()}>
-        <div className="text-center mb-6">
-          <div className="w-16 h-16 bg-orange-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <span className="text-3xl">⏸️</span>
-          </div>
-          <h3 className="text-xl font-bold text-gray-900 mb-2">Pause Subscription?</h3>
-          <p className="text-sm text-gray-600">
-            Pausing will cancel all remaining orders for this week from <strong>{subscription.restaurantId?.name}</strong>.
-          </p>
-        </div>
-
-        <div className="bg-orange-50 border border-orange-200 rounded-lg p-4 mb-6">
-          <div className="flex items-start gap-2 text-sm text-orange-800">
-            <span className="text-lg">⚠️</span>
-            <div>
-              <p className="font-semibold mb-1">What happens:</p>
-              <ul className="text-xs space-y-1 ml-4 list-disc">
-                <li>Remaining orders for this week cancelled</li>
-                <li>No charges while paused</li>
-                <li>Resume anytime to restart</li>
-              </ul>
-            </div>
-          </div>
-        </div>
-
-        <div className="flex gap-3">
-          <button
-            onClick={onCancel}
-            className="flex-1 px-4 py-2.5 border border-gray-200 rounded-lg hover:bg-gray-50 font-semibold text-gray-700"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={onConfirm}
-            className="flex-1 px-4 py-2.5 bg-orange-500 text-white rounded-lg hover:bg-orange-600 font-semibold"
-          >
-            Pause Subscription
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function SubscriptionCard({ subscription, onPause, onResume, onCancel, navigate }) {
+// Sub-components
+function SubscriptionCard({ subscription, onCancel, navigate }) {
   const isActive = subscription.status === 'active';
-  const isPaused = subscription.status === 'paused';
-  const isCancelled = subscription.status === 'cancelled';
   
+  const formatDate = (dateString) => {
+    try {
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) return 'Invalid Date';
+      return date.toLocaleDateString('en-US', { 
+        month: 'short', 
+        day: 'numeric',
+        year: 'numeric'
+      });
+    } catch (error) {
+      return 'Invalid Date';
+    }
+  };
+
   return (
-    <div className={`border-2 rounded-lg p-4 ${isActive ? 'border-violet-200 bg-violet-50' : isPaused ? 'border-orange-200 bg-orange-50' : 'border-gray-200'}`}>
+    <div className="border-2 rounded-lg p-4 border-violet-200 bg-violet-50">
       <div className="flex justify-between items-start mb-3">
         <div>
           <h3 className="font-bold text-lg text-gray-900">{subscription.restaurantId?.name || 'Restaurant'}</h3>
-          <div className="text-sm text-gray-600 mt-1">
-            <span className={`px-2 py-1 rounded text-xs font-semibold ${
-              isActive ? 'bg-violet-200 text-violet-800' :
-              isPaused ? 'bg-orange-200 text-orange-800' :
-              isCancelled ? 'bg-gray-200 text-gray-800' :
-              'bg-gray-200 text-gray-800'
-            }`}>
-              {subscription.status.toUpperCase()}
+          <div className="flex items-center gap-2 mt-1">
+            <span className="px-2 py-1 rounded text-xs font-semibold bg-violet-200 text-violet-800">
+              {subscription.status?.toUpperCase() || 'ACTIVE'}
             </span>
-            {subscription.isRepeating && <span className="ml-2 text-gray-500">🔄 Repeating Weekly</span>}
+            <span className="text-xs text-gray-600 px-2 py-1 bg-gray-100 rounded">
+              {subscription.planType === 'weekly' ? 'Weekly Plan' : 'Monthly Plan'}
+            </span>
           </div>
         </div>
         <div className="flex gap-2">
-          {/* {isActive && (
-            <button onClick={() => onPause(subscription._id)} className="px-3 py-1 bg-orange-500 text-white rounded hover:bg-orange-600 text-sm font-semibold">
-              ⏸️ Pause
-            </button>
-          )}
-          {isPaused && (
-            <button onClick={() => onResume(subscription._id)} className="px-3 py-1 bg-violet-600 text-white rounded hover:bg-violet-700 text-sm font-semibold">
-              ▶️ Resume
-            </button>
-          )} */}
-          {subscription.status === 'halted' && (
-            <button onClick={() => navigate('/wallet')} className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700 text-sm font-semibold">
-              💰 Top Up
-            </button>
-          )}
-          {!isCancelled && (
-            <button onClick={() => onCancel(subscription._id)} className="px-3 py-1 bg-stone-100 text-stone-500 rounded hover:bg-red-50 hover:text-red-600 text-sm font-semibold">
-              ✕
-            </button>
-          )}
+          <button 
+            onClick={onCancel} 
+            className="px-3 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200 text-sm font-semibold"
+          >
+            ✕ Cancel
+          </button>
         </div>
       </div>
 
-      {isPaused && (
-        <div className="mb-3 p-3 bg-orange-100 border border-orange-200 rounded-lg text-sm text-orange-800">
-          ⏸️ <strong>Paused</strong> - Resume to restart deliveries
+      <div className="grid grid-cols-2 gap-3 mb-3">
+        <div>
+          <p className="text-sm text-gray-600">Start Date</p>
+          <p className="font-medium">{formatDate(subscription.startDate)}</p>
+        </div>
+        <div>
+          <p className="text-sm text-gray-600">Total Amount</p>
+          <p className="font-medium">{subscription.totalAmount?.toFixed(2) || '0.00'} BDT</p>
+        </div>
+      </div>
+
+      {subscription.mealSelections?.length > 0 && (
+        <div className="mt-3">
+          <p className="text-sm text-gray-600 mb-1">Meals Selected:</p>
+          <div className="flex flex-wrap gap-2">
+            {subscription.mealSelections.slice(0, 3).map((meal, index) => (
+              <span 
+                key={index}
+                className="text-xs bg-white border px-2 py-1 rounded"
+              >
+                {meal.day?.substring(0, 3)} {meal.mealType === 'lunch' ? '☀️' : '🌙'} ×{meal.quantity || 1}
+              </span>
+            ))}
+            {subscription.mealSelections.length > 3 && (
+              <span className="text-xs text-gray-500 self-center">
+                + {subscription.mealSelections.length - 3} more
+              </span>
+            )}
+          </div>
         </div>
       )}
-
-      <div className="bg-white/50 rounded-lg p-3 mb-4 border border-violet-100">
-        <div className="flex items-center gap-2 text-xs text-violet-800 font-bold mb-1">
-          📅 Schedule Info
-        </div>
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <p className="text-[10px] text-violet-600 uppercase">Starts On</p>
-            <p className="text-xs font-bold text-gray-800">{new Date(subscription.startDate).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</p>
-          </div>
-          <div>
-            <p className="text-[10px] text-violet-600 uppercase">Daily Deduction</p>
-            <p className="text-xs font-bold text-gray-800">Variable</p>
-          </div>
-        </div>
-      </div>
-      
-      <div className="grid grid-cols-7 gap-2">
-        {DAYS.map(day => {
-          const lunch = subscription.mealSelections?.filter(m => m.day === day && m.mealType === 'lunch') || [];
-          const dinner = subscription.mealSelections?.filter(m => m.day === day && m.mealType === 'dinner') || [];
-          
-          return (
-            <div key={day} className="text-center border rounded p-2 bg-white">
-              <div className="text-xs font-semibold text-gray-700 mb-1">{DAY_NAMES[DAYS.indexOf(day)].substring(0, 3)}</div>
-              {lunch.length > 0 && <div className="text-xs text-violet-700 mb-1">🍽️ {lunch.map(m => `${m.quantity}x`).join(', ')}</div>}
-              {dinner.length > 0 && <div className="text-xs text-violet-700">🌙 {dinner.map(m => `${m.quantity}x`).join(', ')}</div>}
-            </div>
-          );
-        })}
-      </div>
     </div>
   );
 }
 
-function CreateSubscriptionModal({ groupedMenuItems, selectedMeals, isRepeating, onMealSelect, onQuantityChange, onRepeatingChange, onCreate, onClose, creating }) {
-  const totalPrice = Object.entries(selectedMeals).reduce((sum, [key, value]) => {
-    const [day, mealType] = key.split('_');
-    const items = groupedMenuItems[day]?.[mealType] || [];
-    const item = items.find(i => i._id === value.menuItemId);
-    return sum + (item?.price || 0) * (value.quantity || 1);
+function CreateSubscriptionModal({ 
+  menuItems, 
+  selectedMeals, 
+  planType, 
+  planDays,
+  planPeriodDisplay,
+  onPlanTypeChange, 
+  onMealSelect, 
+  onQuantityChange, 
+  onSelectAllMealsForDay,
+  onClearAllMealsForDay,
+  onSelectAllMealsOfType,
+  onClearAllSelections, 
+  onPrevPeriod,
+  onNextPeriod,
+  onCreate, 
+  onClose, 
+  creating,
+  meetsMinimumRequirements
+}) {
+  const current = getCurrentDate();
+  const currentTime = `${current.hour.toString().padStart(2, '0')}:${current.minute.toString().padStart(2, '0')}`;
+
+  const totalPrice = Object.values(selectedMeals).reduce((sum, meal) => {
+    const pricePerMeal = meal.price || 0;
+    const quantity = meal.quantity || 1;
+    return sum + (pricePerMeal * quantity);
   }, 0);
+
+  const totalQuantity = Object.values(selectedMeals).reduce((sum, meal) => sum + (meal.quantity || 1), 0);
+  const discountAmount = planType === 'monthly' ? totalPrice * (MONTHLY_DISCOUNT_PERCENT / 100) : 0;
+  const finalPrice = totalPrice - discountAmount;
+
+  const isMealSelected = (dateString, mealType, menuItemId) => {
+    const key = `${dateString}_${mealType}_${menuItemId}`;
+    return !!selectedMeals[key];
+  };
+
+  const getMealQuantity = (dateString, mealType, menuItemId) => {
+    const key = `${dateString}_${mealType}_${menuItemId}`;
+    return selectedMeals[key]?.quantity || 1;
+  };
+
+  const getSelectedCountForDay = (dateString, mealType) => {
+    return Object.keys(selectedMeals).filter(key => 
+      key.startsWith(`${dateString}_${mealType}_`)
+    ).length;
+  };
+
+  const getTotalQuantityForDay = (dateString, mealType) => {
+    return Object.keys(selectedMeals)
+      .filter(key => key.startsWith(`${dateString}_${mealType}_`))
+      .reduce((total, key) => total + (selectedMeals[key]?.quantity || 1), 0);
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
-      <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-        <div className="p-6 border-b flex justify-between items-center">
-          <h3 className="text-2xl font-bold">Create Subscription</h3>
+      <div className="bg-white rounded-lg shadow-xl max-w-6xl w-full max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="p-6 border-b flex justify-between items-center sticky top-0 bg-white z-10">
+          <h3 className="text-2xl font-bold">Create {planType === 'weekly' ? 'Weekly' : 'Monthly'} Subscription</h3>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-700 text-2xl">✕</button>
         </div>
 
         <div className="p-6">
-          <div className="mb-4">
-            <label className="flex items-center gap-2">
-              <input type="checkbox" checked={isRepeating} onChange={e => onRepeatingChange(e.target.checked)} className="w-4 h-4" />
-              <span className="font-semibold">Repeat weekly</span>
-            </label>
-            <p className="text-sm text-gray-600 ml-6 mt-1">
-              {isRepeating ? 'Auto-renews each week' : 'One-time for this week'}
-            </p>
-          </div>
-
-          <div className="space-y-4 mb-6">
-            {DAYS.map(day => (
-              <DayMealSelector
-                key={day}
-                day={day}
-                dayName={DAY_NAMES[DAYS.indexOf(day)]}
-                lunchItems={groupedMenuItems[day]?.lunch || []}
-                dinnerItems={groupedMenuItems[day]?.dinner || []}
-                selectedLunch={selectedMeals[`${day}_lunch`]}
-                selectedDinner={selectedMeals[`${day}_dinner`]}
-                onMealSelect={onMealSelect}
-                onQuantityChange={onQuantityChange}
-              />
-            ))}
-          </div>
-
-          <div className="p-4 bg-stone-50 rounded-xl border mb-6">
-            <div className="flex justify-between items-center mb-2">
-              <span className="font-semibold">Weekly Total:</span>
-              <span className="text-xl font-bold text-violet-700">{totalPrice.toFixed(2)} BDT</span>
+          {/* Plan Type Selection */}
+          <div className="mb-8">
+            <h4 className="font-semibold text-gray-900 mb-3">Choose Subscription Plan:</h4>
+            <div className="grid grid-cols-2 gap-4">
+              <div 
+                onClick={() => onPlanTypeChange('weekly')}
+                className={`border-2 rounded-xl p-4 cursor-pointer transition-all ${
+                  planType === 'weekly' 
+                    ? 'border-violet-500 bg-violet-50' 
+                    : 'border-gray-200 hover:border-violet-200'
+                }`}
+              >
+                <div className="flex items-center gap-3 mb-2">
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                    planType === 'weekly' ? 'bg-violet-100 text-violet-600' : 'bg-gray-100 text-gray-500'
+                  }`}>
+                    📅
+                  </div>
+                  <div>
+                    <h5 className="font-bold text-gray-900">Weekly Plan</h5>
+                    <p className="text-xs text-gray-600">Minimum {WEEKLY_MIN_MEALS} meals required</p>
+                  </div>
+                </div>
+              </div>
+              
+              <div 
+                onClick={() => onPlanTypeChange('monthly')}
+                className={`border-2 rounded-xl p-4 cursor-pointer transition-all ${
+                  planType === 'monthly' 
+                    ? 'border-violet-500 bg-violet-50' 
+                    : 'border-gray-200 hover:border-violet-200'
+                }`}
+              >
+                <div className="flex items-center gap-3 mb-2">
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                    planType === 'monthly' ? 'bg-violet-100 text-violet-600' : 'bg-gray-100 text-gray-500'
+                  }`}>
+                    📆
+                  </div>
+                  <div>
+                    <h5 className="font-bold text-gray-900">Monthly Plan</h5>
+                    <p className="text-xs text-gray-600">Minimum {MONTHLY_MIN_MEALS} meals, {MONTHLY_DISCOUNT_PERCENT}% discount</p>
+                  </div>
+                </div>
+              </div>
             </div>
-            <div className="space-y-1 text-[11px] text-stone-600">
-              <p>✓ Starts from tomorrow (or Monday if Sunday)</p>
-              <p>✓ First week charged upfront</p>
-              <p>✓ Subscription halts if wallet balance low</p>
+          </div>
+
+          {/* Cutoff Time Info */}
+          <div className="mb-6 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+            <div className="flex items-center gap-2 text-sm text-blue-800">
+              <span className="text-lg">🕐</span>
+              <div>
+                <p className="font-semibold">Cutoff Times (Current: {currentTime})</p>
+                <p className="text-xs">Lunch: Before {LUNCH_CUTOFF_HOUR}:00 AM | Dinner: Before {DINNER_CUTOFF_HOUR}:00 PM</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Minimum Requirements Banner */}
+          {!meetsMinimumRequirements && (
+            <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+              <div className="flex items-center gap-3">
+                <div className="text-amber-600 text-xl">⚠️</div>
+                <div>
+                  <p className="font-semibold text-amber-800">Minimum Requirements Not Met</p>
+                  <p className="text-sm text-amber-700">
+                    {planType === 'weekly' 
+                      ? `Weekly requires at least ${WEEKLY_MIN_MEALS} meals. You have ${totalQuantity}.`
+                      : `Monthly requires at least ${MONTHLY_MIN_MEALS} meals. You have ${totalQuantity}.`
+                    }
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Period Navigation */}
+          <div className="mb-6">
+            <div className="flex items-center justify-between bg-gray-50 rounded-lg p-4">
+              <button
+                onClick={onPrevPeriod}
+                className="px-4 py-2 border rounded-lg hover:bg-white"
+              >
+                ← Previous
+              </button>
+              
+              <div className="text-center">
+                <div className="text-lg font-bold text-gray-900">
+                  {planPeriodDisplay}
+                </div>
+                <div className="text-sm text-gray-600">
+                  {planDays.length} days available
+                </div>
+              </div>
+              
+              <button
+                onClick={onNextPeriod}
+                className="px-4 py-2 border rounded-lg hover:bg-white"
+              >
+                Next →
+              </button>
+            </div>
+          </div>
+
+          {/* Quick Select Buttons */}
+          {planDays.length > 0 && (
+            <div className="mb-6 p-4 bg-gray-50 rounded-lg border">
+              <h4 className="font-semibold text-gray-900 mb-3">Quick Select:</h4>
+              <div className="flex flex-wrap gap-3">
+                <button
+                  onClick={() => onSelectAllMealsOfType('lunch')}
+                  className="px-4 py-2 bg-orange-100 text-orange-700 rounded-lg hover:bg-orange-200 font-semibold text-sm"
+                >
+                  ☀️ Select All Lunches
+                </button>
+                <button
+                  onClick={() => onSelectAllMealsOfType('dinner')}
+                  className="px-4 py-2 bg-indigo-100 text-indigo-700 rounded-lg hover:bg-indigo-200 font-semibold text-sm"
+                >
+                  🌙 Select All Dinners
+                </button>
+                <button
+                  onClick={onClearAllSelections}
+                  className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 font-semibold text-sm"
+                >
+                  Clear All
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Days Grid */}
+          <div className="mb-8">
+            {planDays.length === 0 ? (
+              <div className="text-center py-12 bg-gray-50 rounded-lg">
+                <div className="text-4xl mb-4">📭</div>
+                <h3 className="text-lg font-semibold text-gray-700 mb-2">No Menu Available</h3>
+                <button
+                  onClick={onNextPeriod}
+                  className="px-4 py-2 bg-violet-100 text-violet-700 rounded-lg hover:bg-violet-200 font-semibold"
+                >
+                  Check Next {planType === 'weekly' ? 'Week' : 'Month'}
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-6">
+                {planDays.map(dayInfo => {
+                  const { dateString, day, dayName, dateDisplay, menuItems: dayMenuItems, isToday: isTodayDay } = dayInfo;
+                  const lunchAllowed = isMealSelectionAllowed(dateString, 'lunch');
+                  const dinnerAllowed = isMealSelectionAllowed(dateString, 'dinner');
+                  
+                  return (
+                    <div key={dateString} className="border rounded-lg overflow-hidden">
+                      {/* Day Header */}
+                      <div className="bg-gradient-to-r from-violet-50 to-white border-b p-4">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <h3 className="font-bold text-lg text-gray-900">{dayName}</h3>
+                              {isTodayDay && (
+                                <span className="px-2 py-1 bg-violet-100 text-violet-700 text-xs font-semibold rounded">
+                                  TODAY
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-sm text-violet-600 font-semibold">{dateDisplay}</p>
+                          </div>
+                          <div className="text-sm text-gray-600">
+                            {dayMenuItems.lunch.length} lunch • {dayMenuItems.dinner.length} dinner
+                          </div>
+                        </div>
+                      </div>
+                      
+                      {/* Meals */}
+                      <div className="p-4">
+                        {/* Lunch */}
+                        {dayMenuItems.lunch.length > 0 && (
+                          <div className="mb-6">
+                            <div className="flex items-center justify-between mb-3">
+                              <div className="flex items-center gap-2">
+                                <div className="w-8 h-8 rounded-full bg-orange-100 flex items-center justify-center">
+                                  <span className="text-orange-600">☀️</span>
+                                </div>
+                                <h4 className="font-semibold text-gray-900">Lunch</h4>
+                                <span className="text-xs bg-orange-100 text-orange-700 px-2 py-1 rounded">
+                                  {getSelectedCountForDay(dateString, 'lunch')} items • {getTotalQuantityForDay(dateString, 'lunch')} total
+                                </span>
+                              </div>
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={() => onSelectAllMealsForDay(dateString, day, 'lunch', dayMenuItems.lunch)}
+                                  disabled={!lunchAllowed}
+                                  className={`px-3 py-1 text-xs rounded ${
+                                    lunchAllowed
+                                      ? 'bg-orange-100 text-orange-700 hover:bg-orange-200'
+                                      : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                                  }`}
+                                >
+                                  Select One
+                                </button>
+                                <button
+                                  onClick={() => onClearAllMealsForDay(dateString, 'lunch')}
+                                  className="px-3 py-1 text-xs bg-gray-100 text-gray-700 rounded hover:bg-gray-200"
+                                >
+                                  Clear
+                                </button>
+                              </div>
+                            </div>
+                            
+                            {!lunchAllowed && isTodayDay && (
+                              <div className="text-xs text-red-500 mb-2 p-2 bg-red-50 rounded">
+                                ⚠️ Lunch selection closed (after {LUNCH_CUTOFF_HOUR}:00 AM)
+                              </div>
+                            )}
+                            
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                              {dayMenuItems.lunch.map(menuItem => {
+                                const isSelected = isMealSelected(dateString, 'lunch', menuItem._id);
+                                const quantity = getMealQuantity(dateString, 'lunch', menuItem._id);
+                                const key = `${dateString}_lunch_${menuItem._id}`;
+                                
+                                return (
+                                  <div 
+                                    key={menuItem._id} 
+                                    className={`border rounded-lg p-3 ${
+                                      isSelected ? 'border-orange-300 bg-orange-50' : 'border-gray-200'
+                                    } ${!lunchAllowed ? 'opacity-50' : ''}`}
+                                  >
+                                    <div className="flex items-start gap-2">
+                                      <input
+                                        type="checkbox"
+                                        checked={isSelected}
+                                        onChange={(e) => onMealSelect(dateString, day, 'lunch', menuItem._id, e.target.checked)}
+                                        disabled={!lunchAllowed}
+                                        className="w-5 h-5 mt-1 rounded"
+                                      />
+                                      <div className="flex-1">
+                                        <div className="flex justify-between">
+                                          <h5 className="font-medium text-gray-900">{menuItem.name}</h5>
+                                          <span className="font-semibold">{menuItem.price} BDT</span>
+                                        </div>
+                                        {menuItem.description && (
+                                          <p className="text-xs text-gray-500 mt-1">{menuItem.description}</p>
+                                        )}
+                                        {isSelected && (
+                                          <div className="flex items-center gap-2 mt-2">
+                                            <button
+                                              onClick={() => onQuantityChange(key, quantity - 1)}
+                                              className="w-6 h-6 bg-gray-200 rounded hover:bg-gray-300"
+                                            >
+                                              -
+                                            </button>
+                                            <span className="font-semibold">{quantity}</span>
+                                            <button
+                                              onClick={() => onQuantityChange(key, quantity + 1)}
+                                              className="w-6 h-6 bg-gray-200 rounded hover:bg-gray-300"
+                                            >
+                                              +
+                                            </button>
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                        
+                        {/* Dinner */}
+                        {dayMenuItems.dinner.length > 0 && (
+                          <div>
+                            <div className="flex items-center justify-between mb-3">
+                              <div className="flex items-center gap-2">
+                                <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center">
+                                  <span className="text-indigo-600">🌙</span>
+                                </div>
+                                <h4 className="font-semibold text-gray-900">Dinner</h4>
+                                <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded">
+                                  {getSelectedCountForDay(dateString, 'dinner')} items • {getTotalQuantityForDay(dateString, 'dinner')} total
+                                </span>
+                              </div>
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={() => onSelectAllMealsForDay(dateString, day, 'dinner', dayMenuItems.dinner)}
+                                  disabled={!dinnerAllowed}
+                                  className={`px-3 py-1 text-xs rounded ${
+                                    dinnerAllowed
+                                      ? 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200'
+                                      : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                                  }`}
+                                >
+                                  Select One
+                                </button>
+                                <button
+                                  onClick={() => onClearAllMealsForDay(dateString, 'dinner')}
+                                  className="px-3 py-1 text-xs bg-gray-100 text-gray-700 rounded hover:bg-gray-200"
+                                >
+                                  Clear
+                                </button>
+                              </div>
+                            </div>
+                            
+                            {!dinnerAllowed && isTodayDay && (
+                              <div className="text-xs text-red-500 mb-2 p-2 bg-red-50 rounded">
+                                ⚠️ Dinner selection closed (after {DINNER_CUTOFF_HOUR}:00 PM)
+                              </div>
+                            )}
+                            
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                              {dayMenuItems.dinner.map(menuItem => {
+                                const isSelected = isMealSelected(dateString, 'dinner', menuItem._id);
+                                const quantity = getMealQuantity(dateString, 'dinner', menuItem._id);
+                                const key = `${dateString}_dinner_${menuItem._id}`;
+                                
+                                return (
+                                  <div 
+                                    key={menuItem._id} 
+                                    className={`border rounded-lg p-3 ${
+                                      isSelected ? 'border-indigo-300 bg-indigo-50' : 'border-gray-200'
+                                    } ${!dinnerAllowed ? 'opacity-50' : ''}`}
+                                  >
+                                    <div className="flex items-start gap-2">
+                                      <input
+                                        type="checkbox"
+                                        checked={isSelected}
+                                        onChange={(e) => onMealSelect(dateString, day, 'dinner', menuItem._id, e.target.checked)}
+                                        disabled={!dinnerAllowed}
+                                        className="w-5 h-5 mt-1 rounded"
+                                      />
+                                      <div className="flex-1">
+                                        <div className="flex justify-between">
+                                          <h5 className="font-medium text-gray-900">{menuItem.name}</h5>
+                                          <span className="font-semibold">{menuItem.price} BDT</span>
+                                        </div>
+                                        {menuItem.description && (
+                                          <p className="text-xs text-gray-500 mt-1">{menuItem.description}</p>
+                                        )}
+                                        {isSelected && (
+                                          <div className="flex items-center gap-2 mt-2">
+                                            <button
+                                              onClick={() => onQuantityChange(key, quantity - 1)}
+                                              className="w-6 h-6 bg-gray-200 rounded hover:bg-gray-300"
+                                            >
+                                              -
+                                            </button>
+                                            <span className="font-semibold">{quantity}</span>
+                                            <button
+                                              onClick={() => onQuantityChange(key, quantity + 1)}
+                                              className="w-6 h-6 bg-gray-200 rounded hover:bg-gray-300"
+                                            >
+                                              +
+                                            </button>
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Summary */}
+          <div className="p-4 bg-stone-50 rounded-xl border mb-6">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-3">
+              <div>
+                <div className="text-xs text-stone-600 uppercase mb-1">Plan</div>
+                <div className="font-semibold text-gray-900">{planType === 'weekly' ? 'Weekly' : 'Monthly'}</div>
+              </div>
+              <div>
+                <div className="text-xs text-stone-600 uppercase mb-1">Total Meals</div>
+                <div className="font-semibold text-gray-900">
+                  {totalQuantity} meals
+                  {!meetsMinimumRequirements && (
+                    <span className="text-xs text-red-600 ml-2">
+                      (Min: {planType === 'weekly' ? WEEKLY_MIN_MEALS : MONTHLY_MIN_MEALS})
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div>
+                <div className="text-xs text-stone-600 uppercase mb-1">Days</div>
+                <div className="font-semibold text-gray-900">
+                  {new Set(Object.values(selectedMeals).map(m => m.date)).size} days
+                </div>
+              </div>
+              <div>
+                <div className="text-xs text-stone-600 uppercase mb-1">Items</div>
+                <div className="font-semibold text-gray-900">
+                  {Object.keys(selectedMeals).length} items
+                </div>
+              </div>
+            </div>
+            
+            <div className="border-t pt-3">
+              {/* Price Breakdown */}
+              <div className="space-y-2 mb-3">
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600">Subtotal:</span>
+                  <span className="font-medium">{totalPrice.toFixed(2)} BDT</span>
+                </div>
+                
+                {planType === 'monthly' && discountAmount > 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-600">
+                      Monthly Discount ({MONTHLY_DISCOUNT_PERCENT}%):
+                    </span>
+                    <span className="font-medium text-green-600">-{discountAmount.toFixed(2)} BDT</span>
+                  </div>
+                )}
+                
+                <div className="flex justify-between items-center pt-2 border-t">
+                  <span className="font-semibold text-gray-900">
+                    {planType === 'weekly' ? 'Weekly Total:' : 'Monthly Total:'}
+                  </span>
+                  <div className="text-right">
+                    {planType === 'monthly' && discountAmount > 0 && (
+                      <div className="text-xs text-gray-500 line-through mb-1">
+                        {totalPrice.toFixed(2)} BDT
+                      </div>
+                    )}
+                    <span className="text-xl font-bold text-violet-700">{finalPrice.toFixed(2)} BDT</span>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 
           <div className="flex gap-3">
-            <button onClick={onClose} className="flex-1 px-4 py-2 border rounded-xl hover:bg-stone-50 font-semibold">Cancel</button>
-            <button onClick={onCreate} disabled={creating || Object.keys(selectedMeals).length === 0} className="flex-1 px-4 py-2 bg-violet-600 text-white rounded-xl hover:bg-violet-700 font-semibold disabled:opacity-50">
-              {creating ? 'Creating...' : 'Start Subscription'}
+            <button 
+              onClick={onClose} 
+              className="flex-1 px-4 py-2 border rounded-xl hover:bg-stone-50 font-semibold"
+            >
+              Cancel
+            </button>
+            <button 
+              onClick={onCreate} 
+              disabled={creating || !meetsMinimumRequirements || Object.keys(selectedMeals).length === 0}
+              className="flex-1 px-4 py-2 bg-violet-600 text-white rounded-xl hover:bg-violet-700 font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {creating ? 'Creating...' : `Start ${planType === 'weekly' ? 'Weekly' : 'Monthly'} Subscription`}
             </button>
           </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function DayMealSelector({ day, dayName, lunchItems, dinnerItems, selectedLunch, selectedDinner, onMealSelect, onQuantityChange }) {
-  return (
-    <div className="border rounded-lg p-4">
-      <h4 className="font-semibold mb-3">{dayName}</h4>
-      <div className="grid md:grid-cols-2 gap-4">
-        <div>
-          <div className="text-sm font-semibold text-violet-700 mb-2">🍽️ Lunch</div>
-          {lunchItems.length === 0 ? (
-            <p className="text-sm text-gray-400">No lunch items</p>
-          ) : (
-            <>
-              <select value={selectedLunch?.menuItemId || ''} onChange={e => e.target.value ? onMealSelect(day, 'lunch', e.target.value, selectedLunch?.quantity || 1) : onQuantityChange(day, 'lunch', 0)} className="w-full border rounded p-2 mb-2">
-                <option value="">Select lunch...</option>
-                {lunchItems.map(item => <option key={item._id} value={item._id}>{item.name} - {item.price} BDT</option>)}
-              </select>
-              {selectedLunch && (
-                <div className="flex items-center gap-2">
-                  <button onClick={() => onQuantityChange(day, 'lunch', (selectedLunch.quantity || 1) - 1)} className="px-2 py-1 bg-gray-200 rounded">-</button>
-                  <span className="text-sm font-semibold">{selectedLunch.quantity || 1}</span>
-                  <button onClick={() => onQuantityChange(day, 'lunch', (selectedLunch.quantity || 1) + 1)} className="px-2 py-1 bg-gray-200 rounded">+</button>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-        <div>
-          <div className="text-sm font-semibold text-violet-700 mb-2">🌙 Dinner</div>
-          {dinnerItems.length === 0 ? (
-            <p className="text-sm text-gray-400">No dinner items</p>
-          ) : (
-            <>
-              <select value={selectedDinner?.menuItemId || ''} onChange={e => e.target.value ? onMealSelect(day, 'dinner', e.target.value, selectedDinner?.quantity || 1) : onQuantityChange(day, 'dinner', 0)} className="w-full border rounded p-2 mb-2">
-                <option value="">Select dinner...</option>
-                {dinnerItems.map(item => <option key={item._id} value={item._id}>{item.name} - {item.price} BDT</option>)}
-              </select>
-              {selectedDinner && (
-                <div className="flex items-center gap-2">
-                  <button onClick={() => onQuantityChange(day, 'dinner', (selectedDinner.quantity || 1) - 1)} className="px-2 py-1 bg-gray-200 rounded">-</button>
-                  <span className="text-sm font-semibold">{selectedDinner.quantity || 1}</span>
-                  <button onClick={() => onQuantityChange(day, 'dinner', (selectedDinner.quantity || 1) + 1)} className="px-2 py-1 bg-gray-200 rounded">+</button>
-                </div>
-              )}
-            </>
-          )}
         </div>
       </div>
     </div>

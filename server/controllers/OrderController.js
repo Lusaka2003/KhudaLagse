@@ -147,6 +147,7 @@ export const createOrder = async (req, res) => {
 };
 
 // Get orders for the current user
+// In orderController.js - getOrders function
 export const getOrders = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -155,7 +156,7 @@ export const getOrders = async (req, res) => {
       endDate, 
       status, 
       mealType,
-      populate = 'true',
+      populate = 'true', // Default to true
       limit = 50,
       page = 1 
     } = req.query;
@@ -187,22 +188,18 @@ export const getOrders = async (req, res) => {
     // Calculate pagination
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    // Build base query
+    // Build base query - ALWAYS POPULATE!
     let orderQuery = Order.find(query)
       .populate('restaurantId', 'name imageUrl address phone')
       .populate('subscriptionId')
+      .populate({
+        path: 'items.itemId', // THIS IS CRITICAL
+        select: 'name description price calories ingredients imageUrl mealType day date restaurant',
+        model: 'MenuItem'
+      })
       .sort({ deliveryDateTime: -1 })
       .skip(skip)
       .limit(parseInt(limit));
-
-    // Conditionally populate menu items
-    if (populate === 'true' || populate === 'items') {
-      orderQuery = orderQuery.populate({
-        path: 'items.itemId',
-        select: 'name description price calories ingredients imageUrl mealType day date',
-        model: 'MenuItem'
-      });
-    }
 
     const [orders, total] = await Promise.all([
       orderQuery.lean(),

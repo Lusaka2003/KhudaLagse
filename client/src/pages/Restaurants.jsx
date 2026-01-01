@@ -1,16 +1,20 @@
-import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import axiosInstance from '../api/axios';
+import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
+import axiosInstance from "../api/axios";
 
 /* ---------- Rating Stars Component ---------- */
 const RatingStars = ({ rating = 0 }) => {
   const rounded = Math.round(rating);
   return (
     <div className="flex items-center gap-0.5">
-      {[1, 2, 3, 4, 5].map(star => (
+      {[1, 2, 3, 4, 5].map((star) => (
         <span
           key={star}
-          className={star <= rounded ? 'text-amber-400 text-sm' : 'text-stone-300 text-sm'}
+          className={
+            star <= rounded
+              ? "text-amber-400 text-sm"
+              : "text-stone-300 text-sm"
+          }
         >
           ★
         </span>
@@ -26,10 +30,11 @@ export default function Restaurants() {
   const [restaurants, setRestaurants] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedCuisine, setSelectedCuisine] = useState('');
+  const [searchTerm, setSearchTerm] = useState("");
+  const [selectedCuisine, setSelectedCuisine] = useState("");
   const [favorites, setFavorites] = useState([]);
   const [user, setUser] = useState(null);
+  const [menuMatches, setMenuMatches] = useState([]);
 
   useEffect(() => {
     fetchRestaurants();
@@ -37,8 +42,22 @@ export default function Restaurants() {
     fetchUserData();
   }, []);
 
+  useEffect(() => {
+    const term = searchTerm.trim();
+    if (term.length < 2) {
+      setMenuMatches([]);
+      return;
+    }
+
+    const handle = setTimeout(() => {
+      fetchMenuMatches(term);
+    }, 250);
+
+    return () => clearTimeout(handle);
+  }, [searchTerm]);
+
   const fetchUserData = () => {
-    const userData = localStorage.getItem('user');
+    const userData = localStorage.getItem("user");
     if (userData) {
       try {
         const parsed = JSON.parse(userData);
@@ -53,11 +72,13 @@ export default function Restaurants() {
   const fetchRestaurants = async () => {
     try {
       setLoading(true);
-      const res = await axiosInstance.get('/api/restaurants');
+      const res = await axiosInstance.get("/api/restaurants");
       const restaurantsData = res.data;
 
       const reviewsResponses = await Promise.all(
-        restaurantsData.map(r => axiosInstance.get(`/api/reviews/${r._id}`).then(res => res.data))
+        restaurantsData.map((r) =>
+          axiosInstance.get(`/api/reviews/${r._id}`).then((res) => res.data)
+        )
       );
 
       const restaurantsWithRatings = restaurantsData.map((r, i) => {
@@ -71,21 +92,38 @@ export default function Restaurants() {
 
       setRestaurants(restaurantsWithRatings);
     } catch (err) {
-      setError(err.response?.data?.error || err.message || 'Failed to load restaurants');
+      setError(
+        err.response?.data?.error || err.message || "Failed to load restaurants"
+      );
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Search menu items by name and remember restaurants with matches
+  const fetchMenuMatches = async (term) => {
+    try {
+      const res = await axiosInstance.get("/api/menu/search", {
+        params: { query: term },
+      });
+      setMenuMatches(res.data?.data || []);
+    } catch (err) {
+      console.error("Menu search failed:", err);
+      setMenuMatches([]);
     }
   };
 
   /* ---------- Fetch Favorites ---------- */
   const fetchFavorites = async () => {
     try {
-      const res = await axiosInstance.get('/api/auth/favorites');
+      const res = await axiosInstance.get("/api/auth/favorites");
       const favData = res.data.favorites || [];
-      const favIds = favData.map(f => typeof f === 'string' ? f : f._id?.toString() || f.toString());
+      const favIds = favData.map((f) =>
+        typeof f === "string" ? f : f._id?.toString() || f.toString()
+      );
       setFavorites(favIds);
     } catch (err) {
-      console.error('Error fetching favorites:', err);
+      console.error("Error fetching favorites:", err);
       setFavorites([]);
     }
   };
@@ -94,30 +132,45 @@ export default function Restaurants() {
   const toggleFavorite = async (restaurantId) => {
     try {
       const isFavorite = favorites.includes(restaurantId);
-      
+
       if (isFavorite) {
         await axiosInstance.delete(`/api/auth/favorites/${restaurantId}`);
-        setFavorites(prev => prev.filter(id => id !== restaurantId));
+        setFavorites((prev) => prev.filter((id) => id !== restaurantId));
       } else {
         await axiosInstance.post(`/api/auth/favorites/${restaurantId}`);
-        setFavorites(prev => [...prev, restaurantId]);
+        setFavorites((prev) => [...prev, restaurantId]);
       }
     } catch (err) {
-      console.error('Error toggling favorite:', err);
-      alert('Failed to update favorites. Please try again.');
+      console.error("Error toggling favorite:", err);
+      alert("Failed to update favorites. Please try again.");
     }
   };
 
   /* ---------- Filters ---------- */
-  const allCuisines = [...new Set(restaurants.flatMap(r => r.cuisineTypes || []))].sort();
+  const allCuisines = [
+    ...new Set(restaurants.flatMap((r) => r.cuisineTypes || [])),
+  ].sort();
+
+  const matchedMenuMap = menuMatches.reduce((acc, entry) => {
+    const id = entry.restaurant?._id;
+    if (!id) return acc;
+    acc[id] = entry.menuItems || [];
+    return acc;
+  }, {});
+
+  const searchTermLower = searchTerm.toLowerCase();
 
   const filteredRestaurants = restaurants
-    .filter(r => {
+    .filter((r) => {
       const matchesSearch =
-        r.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        r.location?.city?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        r.location?.area?.toLowerCase().includes(searchTerm.toLowerCase());
-      const matchesCuisine = !selectedCuisine || r.cuisineTypes?.includes(selectedCuisine);
+        r.name?.toLowerCase().includes(searchTermLower) ||
+        r.location?.city?.toLowerCase().includes(searchTermLower) ||
+        r.location?.area?.toLowerCase().includes(searchTermLower) ||
+        matchedMenuMap[r._id]?.some((item) =>
+          item.name?.toLowerCase().includes(searchTermLower)
+        );
+      const matchesCuisine =
+        !selectedCuisine || r.cuisineTypes?.includes(selectedCuisine);
       return matchesSearch && matchesCuisine;
     })
     .sort((a, b) => {
@@ -128,33 +181,37 @@ export default function Restaurants() {
       return b.totalRatings - a.totalRatings;
     });
 
-  const formatAddress = location => {
-    if (!location) return 'Address not available';
-    return [location.house, location.road, location.area, location.city].filter(Boolean).join(', ');
+  const formatAddress = (location) => {
+    if (!location) return "Address not available";
+    return [location.house, location.road, location.area, location.city]
+      .filter(Boolean)
+      .join(", ");
   };
 
   /* ---------- Loading / Error ---------- */
-  if (loading) return (
-    <div className="min-h-screen bg-stone-50 flex items-center justify-center pt-24">
-      <div className="text-center">
-        <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-violet-600 border-t-transparent mx-auto mb-4"></div>
-        <p className="text-stone-600 text-lg">Loading restaurants...</p>
+  if (loading)
+    return (
+      <div className="min-h-screen bg-stone-50 flex items-center justify-center pt-24">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-violet-600 border-t-transparent mx-auto mb-4"></div>
+          <p className="text-stone-600 text-lg">Loading restaurants...</p>
+        </div>
       </div>
-    </div>
-  );
+    );
 
   /* ---------- UI ---------- */
   return (
     <div className="min-h-screen bg-gradient-to-br from-stone-50 via-violet-50/30 to-stone-100 pt-12 pb-24">
       <div className="max-w-7xl mx-auto px-4 py-8">
-        
         {/* Header Dashboard Widgets (Only if user logged in) */}
         {user && (
           <div className="mb-12">
             {/* Welcome / Title */}
-            <div className="bg-gradient-to-r from-violet-700 to-violet-600 rounded-2xl p-8 text-white shadow-lg flex flex-col justify-center text-center md:text-left">
+            <div className="bg-gradient-to-r from-violet-700 to-teal-600 rounded-2xl p-8 text-white shadow-lg flex flex-col justify-center text-center md:text-left">
               <h1 className="text-4xl font-bold mb-2">Discover Food</h1>
-              <p className="text-violet-100 text-lg">Find your next favorite meal from our curated kitchens.</p>
+              <p className="text-violet-100 text-lg">
+                Find your next favorite meal from our curated kitchens.
+              </p>
             </div>
           </div>
         )}
@@ -162,52 +219,73 @@ export default function Restaurants() {
         {/* Search & Filter Header (If not user, show title here) */}
         {!user && (
           <div className="text-center mb-10">
-            <h1 className="text-5xl font-bold text-stone-800 mb-3 tracking-tight">Restaurants</h1>
-            <p className="text-stone-500 text-lg">Curated kitchens delivering fresh to your door.</p>
+            <h1 className="text-5xl font-bold text-stone-800 mb-3 tracking-tight">
+              Restaurants
+            </h1>
+            <p className="text-stone-500 text-lg">
+              Curated kitchens delivering fresh to your door.
+            </p>
           </div>
         )}
 
         {/* Search Bar */}
         <div className="bg-white rounded-2xl p-4 shadow-sm border border-stone-200/60 mb-10 flex flex-col md:flex-row gap-4">
           <div className="flex-1 relative">
-            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-stone-400">🔍</span>
+            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-stone-400">
+              🔍
+            </span>
             <input
               type="text"
               placeholder="Search by name, city, or area..."
               value={searchTerm}
-              onChange={e => setSearchTerm(e.target.value)}
+              onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-11 pr-4 py-3 bg-stone-50 border border-stone-200 rounded-xl focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 focus:outline-none transition"
             />
           </div>
           <div className="md:w-64 relative">
-             <span className="absolute left-4 top-1/2 -translate-y-1/2 text-stone-400">🥘</span>
+            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-stone-400">
+              🥘
+            </span>
             <select
               value={selectedCuisine}
-              onChange={e => setSelectedCuisine(e.target.value)}
+              onChange={(e) => setSelectedCuisine(e.target.value)}
               className="w-full pl-11 pr-10 py-3 bg-stone-50 border border-stone-200 rounded-xl appearance-none focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 focus:outline-none transition cursor-pointer"
             >
               <option value="">All Cuisines</option>
-              {allCuisines.map(c => <option key={c} value={c}>{c}</option>)}
+              {allCuisines.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
             </select>
-            <span className="absolute right-4 top-1/2 -translate-y-1/2 text-stone-400 pointer-events-none">▼</span>
+            <span className="absolute right-4 top-1/2 -translate-y-1/2 text-stone-400 pointer-events-none">
+              ▼
+            </span>
           </div>
         </div>
 
         {/* Error State */}
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-xl p-8 text-center mb-8">
-            <h2 className="text-red-800 font-bold text-xl mb-2">Error Loading Restaurants</h2>
+            <h2 className="text-red-800 font-bold text-xl mb-2">
+              Error Loading Restaurants
+            </h2>
             <p className="text-red-600 mb-6">{error}</p>
-            <button onClick={fetchRestaurants} className="bg-violet-600 text-white px-6 py-3 rounded-lg hover:bg-violet-700 transition">Try Again</button>
+            <button
+              onClick={fetchRestaurants}
+              className="bg-violet-600 text-white px-6 py-3 rounded-lg hover:bg-violet-700 transition"
+            >
+              Try Again
+            </button>
           </div>
         )}
 
         {/* Restaurant Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-          {filteredRestaurants.map(r => (
-            <div 
-              key={r._id} 
-              onClick={() => navigate(`/restaurants/${r._id}`)} 
+          {filteredRestaurants.map((r) => (
+            <div
+              key={r._id}
+              onClick={() => navigate(`/restaurants/${r._id}`)}
               className="group bg-white rounded-2xl border border-stone-200/60 shadow-sm hover:shadow-xl hover:border-violet-200 hover:-translate-y-1 transition-all duration-300 cursor-pointer overflow-hidden flex flex-col"
             >
               {/* Image Placeholder */}
@@ -215,16 +293,22 @@ export default function Restaurants() {
                 <div className="absolute inset-0 flex items-center justify-center text-6xl group-hover:scale-110 transition-transform duration-500">
                   🍽️
                 </div>
-                
+
                 {/* Favorite Button */}
                 <button
-                  onClick={e => { 
-                    e.stopPropagation(); 
-                    toggleFavorite(r._id); 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleFavorite(r._id);
                   }}
                   className="absolute top-4 right-4 w-10 h-10 rounded-full bg-white/80 backdrop-blur-sm shadow-sm flex items-center justify-center hover:bg-white transition"
                 >
-                  <span className={`text-xl transition-all ${favorites.includes(r._id) ? 'scale-110' : 'grayscale opacity-40 hover:opacity-70 hover:scale-110'}`}>
+                  <span
+                    className={`text-xl transition-all ${
+                      favorites.includes(r._id)
+                        ? "scale-110"
+                        : "grayscale opacity-40 hover:opacity-70 hover:scale-110"
+                    }`}
+                  >
                     ❤️
                   </span>
                 </button>
@@ -245,20 +329,46 @@ export default function Restaurants() {
                   </h2>
                   <div className="flex items-center gap-1 bg-stone-50 px-2 py-1 rounded-lg border border-stone-100">
                     <span className="text-amber-400 text-sm">★</span>
-                    <span className="text-sm font-bold text-stone-700">{r.rating.toFixed(1)}</span>
-                    <span className="text-xs text-stone-400">({r.totalRatings})</span>
+                    <span className="text-sm font-bold text-stone-700">
+                      {r.rating.toFixed(1)}
+                    </span>
+                    <span className="text-xs text-stone-400">
+                      ({r.totalRatings})
+                    </span>
                   </div>
                 </div>
 
                 <div className="flex items-start gap-2 text-stone-500 mb-6 text-sm">
                   <span className="shrink-0 mt-0.5">📍</span>
-                  <span className="line-clamp-2">{formatAddress(r.location)}</span>
+                  <span className="line-clamp-2">
+                    {formatAddress(r.location)}
+                  </span>
                 </div>
+
+                {matchedMenuMap[r._id]?.length > 0 && (
+                  <div className="mb-6">
+                    <p className="text-xs font-semibold text-violet-700">
+                      Matching dishes
+                    </p>
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      {matchedMenuMap[r._id].slice(0, 3).map((item) => (
+                        <span
+                          key={item._id}
+                          className="inline-flex items-center gap-1 rounded-full bg-violet-50 px-3 py-1 text-xs font-medium text-violet-700 border border-violet-100"
+                        >
+                          {item.name}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 <div className="mt-auto pt-6 border-t border-stone-100">
                   <button className="w-full py-3 rounded-xl bg-violet-50 text-violet-700 font-semibold hover:bg-violet-600 hover:text-white transition-colors duration-300 flex items-center justify-center gap-2 group/btn">
                     View Menu
-                    <span className="group-hover/btn:translate-x-1 transition-transform">→</span>
+                    <span className="group-hover/btn:translate-x-1 transition-transform">
+                      →
+                    </span>
                   </button>
                 </div>
               </div>

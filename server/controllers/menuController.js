@@ -158,6 +158,48 @@ export const getMenuByRestaurantId = async (req, res) => {
         res.status(500).json({ success: false, message: err.message });
     }
 };
+//Search menu Items
+
+export const searchMenuItems = async (req, res) => {
+  try {
+    const term = (req.query.query || "").trim();
+    if (!term) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Query is required" });
+    }
+
+    const regex = new RegExp(term, "i");
+    const items = await MenuItem.find({ name: regex }).populate(
+      "restaurant",
+      "name location cuisineTypes rating totalRatings"
+    );
+
+    const grouped = items.reduce((acc, item) => {
+      const restaurant = item.restaurant;
+      if (!restaurant?._id) return acc;
+
+      const key = restaurant._id.toString();
+      if (!acc[key]) {
+        acc[key] = { restaurant, menuItems: [] };
+      }
+
+      acc[key].menuItems.push({
+        _id: item._id,
+        name: item.name,
+        price: item.price,
+        imageUrl: item.imageUrl,
+        day: item.day,
+        mealType: item.mealType,
+      });
+      return acc;
+    }, {});
+
+    res.json({ success: true, data: Object.values(grouped) });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
 
 // Update menu item
 export const updateMenuItem = async (req, res) => {
