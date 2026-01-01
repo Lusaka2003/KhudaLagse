@@ -19,7 +19,7 @@ export const addReview = async (req, res) => {
     // Create or update review
     const review = await Review.findOneAndUpdate(
       { restaurant: restaurantId, user: userId },
-      { rating, comment, status: 'pending' },
+      { rating, comment, status: 'approved' },
       { new: true, upsert: true, runValidators: true }
     );
 

@@ -32,7 +32,7 @@ export default function Rewards() {
 		const colors = {
 			signup: 'bg-blue-100 text-blue-700',
 			referral: 'bg-purple-100 text-purple-700',
-			purchase: 'bg-green-100 text-green-700',
+			purchase: 'bg-pink-100 text-pink-700',
 			bonus: 'bg-yellow-100 text-yellow-700',
 			refund: 'bg-red-100 text-red-700',
 		};
@@ -76,7 +76,7 @@ export default function Rewards() {
 				</div>
 				<div className="rounded-xl border border-gray-100 bg-white p-4 shadow-sm">
 					<div className="text-sm text-gray-600">Total Amount</div>
-					<div className="text-2xl font-bold text-green-600 mt-1">
+					<div className="text-2xl font-bold text-pink-500 mt-1">
 						${rewards.reduce((sum, r) => sum + (r.amount || 0), 0).toFixed(2)}
 					</div>
 				</div>
@@ -129,7 +129,7 @@ export default function Rewards() {
 										</span>
 									</td>
 									<td className="px-4 py-3">
-										<span className="font-bold text-green-600">
+										<span className="font-bold text-pink-500">
 											${p.amount?.toFixed(2) || '0.00'}
 										</span>
 									</td>

@@ -367,41 +367,7 @@ export default function RestaurantDashboard() {
 					</button>
 				</div>
 
-				<div className="bg-white rounded-lg shadow-sm border border-gray-200 p-8 mb-10">
-					<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-						<h2 className="text-2xl font-bold text-gray-900 tracking-tight">
-							Admin Comments
-						</h2>
-						<button
-							onClick={() => navigate('/restaurant/manage-menu')}
-							className="px-4 py-2 bg-violet-600 text-white rounded transition duration-200 hover:bg-violet-700 shadow-md"
-						>
-							Open Menu
-						</button>
-					</div>
-
-					{adminMealComments.length === 0 ? (
-						<div className="mt-4 text-gray-600">No admin comments.</div>
-					) : (
-						<div className="mt-4 space-y-3">
-							{adminMealComments.map((m) => (
-								<div key={m._id} className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
-									<div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-										<div className="font-semibold text-amber-900">
-											{m.name || 'Meal'}{m.day ? ` • ${m.day}` : ''}{m.mealType ? ` • ${m.mealType}` : ''}
-										</div>
-										<div className="text-xs text-amber-800">
-											{m.adminCommentedAt ? new Date(m.adminCommentedAt).toLocaleString() : ''}
-										</div>
-									</div>
-									<div className="mt-2 whitespace-pre-wrap text-sm text-amber-900">
-										{m.adminComment}
-									</div>
-								</div>
-							))}
-						</div>
-					)}
-				</div>
+				
 
 				{/* Restaurant Info */}
 				<div className="bg-white rounded-lg shadow-sm border border-gray-200 p-8">

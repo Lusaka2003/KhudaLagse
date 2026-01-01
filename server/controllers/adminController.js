@@ -150,13 +150,14 @@ export const listUsers = async (req, res) => {
 		return res.status(500).json({ success: false, message: error.message });
 	}
 };
+// Update your updateUser function in the admin controller to support all fields:
 
 export const updateUser = async (req, res) => {
 	try {
 		const { id } = req.params;
-		const { role, isActive } = req.body;
+		const { role, isActive, name, email, phone } = req.body;
 
-		const target = await User.findById(id).select('role isSuperAdmin');
+		const target = await User.findById(id).select('role isSuperAdmin email');
 		if (!target) {
 			return res.status(404).json({ success: false, message: 'User not found.' });
 		}
@@ -169,9 +170,23 @@ export const updateUser = async (req, res) => {
 			return res.status(403).json({ success: false, message: 'Admin role is reserved.' });
 		}
 
+		// Check if email is being changed and if it's already in use
+		if (email && email !== target.email) {
+			const emailExists = await User.exists({ email, _id: { $ne: id } });
+			if (emailExists) {
+				return res.status(409).json({ 
+					success: false, 
+					message: 'Email already in use by another user.' 
+				});
+			}
+		}
+
 		const update = {};
 		if (role) update.role = role;
 		if (isActive != null) update.isActive = Boolean(isActive);
+		if (name) update.name = name;
+		if (email) update.email = email;
+		if (phone !== undefined) update.phone = phone;
 
 		const user = await User.findByIdAndUpdate(id, update, {
 			new: true,
@@ -286,9 +301,11 @@ export const updateOrderStatus = async (req, res) => {
 
 export const listDeliveries = async (req, res) => {
 	try {
-		const { status, page = 1, limit = 20 } = req.query;
+		const { status, order, page = 1, limit = 20 } = req.query;
 		const query = {};
+		
 		if (status) query.status = status;
+		if (order) query.order = order; // Add support for order filter
 
 		const skip = (Number(page) - 1) * Number(limit);
 		const [items, total] = await Promise.all([
