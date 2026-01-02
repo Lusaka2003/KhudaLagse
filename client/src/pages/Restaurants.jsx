@@ -35,11 +35,12 @@ export default function Restaurants() {
   const [favorites, setFavorites] = useState([]);
   const [user, setUser] = useState(null);
   const [menuMatches, setMenuMatches] = useState([]);
+  const [userCity, setUserCity] = useState("");
 
   useEffect(() => {
+    fetchUserData();
     fetchRestaurants();
     fetchFavorites();
-    fetchUserData();
   }, []);
 
   useEffect(() => {
@@ -62,6 +63,14 @@ export default function Restaurants() {
       try {
         const parsed = JSON.parse(userData);
         setUser(parsed);
+        
+        // Get user's city from their address
+        if (parsed.address && parsed.address.city) {
+          setUserCity(parsed.address.city);
+        } else if (parsed.city) {
+          // Check if city is directly on user object
+          setUserCity(parsed.city);
+        }
       } catch (e) {
         console.error("Failed to parse user", e);
       }
@@ -160,8 +169,17 @@ export default function Restaurants() {
 
   const searchTermLower = searchTerm.toLowerCase();
 
+  // Filter restaurants by user's city
   const filteredRestaurants = restaurants
     .filter((r) => {
+      // Only show restaurants in user's city if user is logged in and has a city
+      if (userCity) {
+        const restaurantCity = r.location?.city || r.city || "";
+        if (restaurantCity.toLowerCase() !== userCity.toLowerCase()) {
+          return false;
+        }
+      }
+      
       const matchesSearch =
         r.name?.toLowerCase().includes(searchTermLower) ||
         r.location?.city?.toLowerCase().includes(searchTermLower) ||
@@ -210,8 +228,17 @@ export default function Restaurants() {
             <div className="bg-gradient-to-r from-violet-700 to-teal-600 rounded-2xl p-8 text-white shadow-lg flex flex-col justify-center text-center md:text-left">
               <h1 className="text-4xl font-bold mb-2">Discover Food</h1>
               <p className="text-violet-100 text-lg">
-                Find your next favorite meal from our curated kitchens.
+                {userCity 
+                  ? `Restaurants in ${userCity}`
+                  : "Find your next favorite meal from our curated kitchens."
+                }
               </p>
+              {userCity && (
+                <div className="mt-4 inline-flex items-center gap-2 bg-white/20 backdrop-blur-sm rounded-full px-4 py-2 self-start">
+                  <span className="text-sm">📍</span>
+                  
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -224,6 +251,20 @@ export default function Restaurants() {
             </h1>
             <p className="text-stone-500 text-lg">
               Curated kitchens delivering fresh to your door.
+            </p>
+            <div className="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-xl max-w-2xl mx-auto">
+              <p className="text-yellow-800 text-sm">
+                <strong>Note:</strong> Please log in to see restaurants available in your city.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* City Filter Notice */}
+        {user && !userCity && (
+          <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-xl">
+            <p className="text-blue-800 text-sm">
+              <strong>Tip:</strong> Update your profile with your city to see restaurants near you.
             </p>
           </div>
         )}
@@ -264,6 +305,36 @@ export default function Restaurants() {
           </div>
         </div>
 
+        {/* No Restaurants Found Message */}
+        {filteredRestaurants.length === 0 && !loading && (
+          <div className="bg-white rounded-2xl p-12 text-center border border-stone-200 mb-8">
+            <div className="text-6xl mb-6">🏙️</div>
+            <h2 className="text-2xl font-bold text-stone-800 mb-3">
+              {userCity 
+                ? `No restaurants found in ${userCity}`
+                : "No restaurants found"
+              }
+            </h2>
+            <p className="text-stone-500 mb-6">
+              {userCity
+                ? "Try searching for something else or check back later for new restaurants in your city."
+                : "Try adjusting your search or filters."
+              }
+            </p>
+            {userCity && (
+              <button
+                onClick={() => {
+                  setSelectedCuisine("");
+                  setSearchTerm("");
+                }}
+                className="bg-violet-600 text-white px-6 py-3 rounded-lg hover:bg-violet-700 transition"
+              >
+                Clear Filters
+              </button>
+            )}
+          </div>
+        )}
+
         {/* Error State */}
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-xl p-8 text-center mb-8">
@@ -277,6 +348,13 @@ export default function Restaurants() {
             >
               Try Again
             </button>
+          </div>
+        )}
+
+        {/* Restaurant Count */}
+        {filteredRestaurants.length > 0 && (
+          <div className="mb-6 text-stone-600">
+            
           </div>
         )}
 
@@ -312,6 +390,8 @@ export default function Restaurants() {
                     ❤️
                   </span>
                 </button>
+
+                
 
                 {/* Cuisine Tag */}
                 {r.cuisineTypes && r.cuisineTypes[0] && (
