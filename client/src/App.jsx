@@ -7,6 +7,8 @@ import Restaurants from './pages/Restaurants';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import RestaurantRegister from './pages/RestaurantRegister';
+
+import DeliveryStaffRegistration from './pages/DeliveryStaffRegistration';
 import VerifyEmail from './pages/VerifyEmail';
 import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
@@ -53,6 +55,8 @@ function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
           <Route path="/restaurant-signup" element={<RestaurantRegister />} />
+          <Route path="/delivery-staff-signup" element={<DeliveryStaffRegistration />} />
+
           <Route path="/verify-email" element={<VerifyEmail />} />
           <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/reset-password" element={<ResetPassword />} />
