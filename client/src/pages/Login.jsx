@@ -71,7 +71,10 @@ export default function Login() {
 	};
 
 	return (
-		<div className="min-h-screen bg-gradient-to-br from-stone-50 via-violet-50/30 to-stone-100 px-4 pb-16 pt-28">
+		<div 
+			className="min-h-screen bg-cover bg-center bg-fixed px-4 pb-16 pt-28"
+			style={{ backgroundImage: `url(/background.png)` }}
+		>
 			<div className="mx-auto max-w-md">
 				<div className="rounded-2xl bg-white p-10 shadow-lg border border-stone-200/60">
 					{/* Header */}
