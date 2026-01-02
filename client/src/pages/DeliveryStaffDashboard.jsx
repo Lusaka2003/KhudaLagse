@@ -100,7 +100,6 @@ export default function DeliveryStaffDashboard() {
       loadDeliveries();
       loadAvailableOffers();
 
-      // Refresh deliveries AND offers every 15 seconds
       const interval = setInterval(() => {
         loadDeliveries();
         if (isAvailable) loadAvailableOffers();
@@ -208,7 +207,6 @@ export default function DeliveryStaffDashboard() {
   return (
     <div className="min-h-screen bg-stone-50 pt-24 pb-12 px-4">
       <div className="max-w-6xl mx-auto">
-        {/* Header Section */}
         <div className="bg-white rounded-2xl border border-stone-200 p-6 sm:p-8 flex flex-col sm:flex-row justify-between items-center gap-6 mb-8 shadow-sm">
           <div className="flex items-center gap-4">
             <div className="w-16 h-16 rounded-2xl bg-violet-600 flex items-center justify-center text-white text-3xl shadow-lg shadow-violet-100">
@@ -225,25 +223,15 @@ export default function DeliveryStaffDashboard() {
           </div>
           <div className="flex items-center gap-3">
             <button
-              onClick={toggleAvailability}
-              className={`px-6 py-2.5 rounded-xl font-bold transition-all shadow-sm ${
-                isAvailable
-                  ? "bg-red-50 text-red-600 hover:bg-red-100 border border-red-100"
-                  : "bg-violet-600 text-white hover:bg-violet-700 shadow-violet-100"
-              }`}
-            >
-              {isAvailable ? "Go Offline" : "Go Online"}
-            </button>
-            <button
               onClick={handleLogout}
-              className="p-3 rounded-xl border border-stone-200 text-stone-400 hover:text-stone-600 hover:bg-stone-50 transition"
+              className="flex items-center gap-2 px-4 py-2 bg-white border border-violet-300 text-violet-600 hover:bg-red-50 rounded-lg transition-colors font-medium"
             >
               <FaSignOutAlt />
+              <span>Sign Out</span>
             </button>
           </div>
         </div>
 
-        {/* Quick Stats */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
           <StatCard
             icon={<FaHistory />}
@@ -279,7 +267,6 @@ export default function DeliveryStaffDashboard() {
         </div>
 
         <div className="grid lg:grid-cols-3 gap-8">
-          {/* Left Column: Active Orders & Tracking */}
           <div className="lg:col-span-2 space-y-8">
             <div>
               <h2 className="text-xl font-bold text-stone-800 mb-4 flex items-center gap-2">
@@ -324,26 +311,35 @@ export default function DeliveryStaffDashboard() {
                   <p className="text-stone-400 animate-pulse">
                     Checking for new orders...
                   </p>
-                ) : availableOffers.length > 0 ? (
-                  availableOffers.map((offer) => (
-                    <OfferCard
-                      key={offer._id}
-                      offer={offer}
-                      onAccept={acceptOffer}
-                    />
-                  ))
-                ) : (
-                  <div className="bg-stone-100 rounded-2xl p-6 text-center text-stone-500 text-sm">
-                    {isAvailable
-                      ? "Searching for nearby orders..."
-                      : "Go online to see available orders."}
-                  </div>
-                )}
+                ) : (() => {
+                    const userCity = user?.address?.city?.toLowerCase().trim();
+                    const filteredOffers = availableOffers.filter((offer) => {
+                      const offerCity = offer.order?.restaurantId?.location?.city?.toLowerCase().trim();
+                      return userCity && offerCity && userCity === offerCity;
+                    });
+                    
+                    return filteredOffers.length > 0 ? (
+                      filteredOffers.map((offer) => (
+                        <OfferCard
+                          key={offer._id}
+                          offer={offer}
+                          onAccept={acceptOffer}
+                        />
+                      ))
+                    ) : (
+                      <div className="bg-stone-100 rounded-2xl p-6 text-center text-stone-500 text-sm">
+                        {isAvailable
+                          ? userCity
+                            ? "No orders available in your city right now..."
+                            : "Please set your address in profile to see available orders."
+                          : "Go online to see available orders."}
+                      </div>
+                    );
+                  })()}
               </div>
             </div>
           </div>
 
-          {/* Right Column: Profile & Info */}
           <div className="space-y-6">
             <div className="bg-white rounded-2xl border border-stone-200 p-6 shadow-sm">
               <div className="flex justify-between items-center mb-4">
@@ -362,6 +358,18 @@ export default function DeliveryStaffDashboard() {
                 />
                 <ProfileItem label="Phone" value={user?.phone} />
                 <ProfileItem label="Email" value={user?.email} />
+                <ProfileItem
+                  label="Address"
+                  value={
+                    user?.address
+                      ? `${user.address.house || ""} ${
+                          user.address.road || ""
+                        }, ${user.address.area || ""}, ${
+                          user.address.city || ""
+                        }`.trim()
+                      : "Not set"
+                  }
+                />
               </div>
             </div>
 
@@ -381,7 +389,6 @@ export default function DeliveryStaffDashboard() {
         </div>
       </div>
 
-      {/* Profile Edit Modal */}
       {isEditModalOpen && (
         <EditProfileModal
           user={user}
@@ -405,6 +412,12 @@ const EditProfileModal = ({ user, onClose, onUpdate }) => {
     name: user?.name || "",
     phone: user?.phone || "",
     vehicleType: user?.vehicleType || "",
+    address: {
+      house: user?.address?.house || "",
+      road: user?.address?.road || "",
+      area: user?.address?.area || "",
+      city: user?.address?.city || "",
+    },
   });
   const [saving, setSaving] = useState(false);
 
@@ -426,8 +439,8 @@ const EditProfileModal = ({ user, onClose, onUpdate }) => {
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-stone-900/60 backdrop-blur-sm animate-in fade-in duration-300">
-      <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
-        <div className="p-6 border-b border-stone-100 flex justify-between items-center bg-stone-50">
+      <div className="bg-white rounded-3xl w-full max-w-md max-h-[90vh] overflow-y-auto shadow-2xl animate-in zoom-in-95 duration-300">
+        <div className="sticky top-0 p-6 border-b border-stone-100 flex justify-between items-center bg-stone-50">
           <h3 className="text-xl font-bold text-stone-800">Edit Profile</h3>
           <button
             onClick={onClose}
@@ -484,6 +497,83 @@ const EditProfileModal = ({ user, onClose, onUpdate }) => {
               <option value="Other">Other</option>
             </select>
           </div>
+          
+          <div className="pt-2">
+            <h4 className="text-xs font-bold text-stone-400 uppercase tracking-widest mb-3 ml-1">
+              Address
+            </h4>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-stone-500 mb-1.5 ml-1">
+                  House/Flat No.
+                </label>
+                <input
+                  type="text"
+                  className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-3 text-stone-800 font-medium focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 outline-none transition"
+                  value={formData.address.house}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      address: { ...formData.address, house: e.target.value },
+                    })
+                  }
+                  placeholder="e.g., 123"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-stone-500 mb-1.5 ml-1">
+                  Road/Street
+                </label>
+                <input
+                  type="text"
+                  className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-3 text-stone-800 font-medium focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 outline-none transition"
+                  value={formData.address.road}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      address: { ...formData.address, road: e.target.value },
+                    })
+                  }
+                  placeholder="e.g., Main Street"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-stone-500 mb-1.5 ml-1">
+                  Area
+                </label>
+                <input
+                  type="text"
+                  className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-3 text-stone-800 font-medium focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 outline-none transition"
+                  value={formData.address.area}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      address: { ...formData.address, area: e.target.value },
+                    })
+                  }
+                  placeholder="e.g., Gulshan"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-stone-500 mb-1.5 ml-1">
+                  City
+                </label>
+                <input
+                  type="text"
+                  className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-3 text-stone-800 font-medium focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 outline-none transition"
+                  value={formData.address.city}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      address: { ...formData.address, city: e.target.value },
+                    })
+                  }
+                  placeholder="e.g., Dhaka"
+                />
+              </div>
+            </div>
+          </div>
+          
           <div className="pt-4 flex gap-3">
             <button
               type="button"
@@ -624,7 +714,7 @@ const ActiveDeliveryCard = ({ delivery, onUpdate }) => {
         </div>
       </div>
 
-      <div className="bg-stone-50 rounded-xl p-4 text-sm space-y-2">
+      <div className="bg-stone-50 rounded-xl p-4 text-sm space-y-2 mb-3">
         <h4 className="font-bold text-stone-800">Pickup Location</h4>
         <div className="flex items-start gap-3">
           <FaMapMarkerAlt className="mt-1 text-orange-500 shrink-0" />
@@ -672,6 +762,7 @@ const ActiveDeliveryCard = ({ delivery, onUpdate }) => {
   );
 };
 
+
 const OfferCard = ({ offer, onAccept }) => (
   <div className="bg-violet-50 border border-violet-100 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row justify-between items-center gap-4 transition hover:bg-violet-100/50">
     <div className="flex-1 w-full sm:w-auto">
@@ -715,3 +806,4 @@ const ProfileItem = ({ label, value }) => (
     </span>
   </div>
 );
+
