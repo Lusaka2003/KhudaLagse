@@ -109,6 +109,7 @@ const getWeekRange = () => {
 };
 
 // Helper function to get next 30 days
+// Helper function to get next 30 days
 const getNext30Days = () => {
 	const days = [];
 	const today = new Date();
@@ -117,9 +118,16 @@ const getNext30Days = () => {
 	for (let i = 0; i < 30; i++) {
 		const date = new Date(today);
 		date.setDate(date.getDate() + i);
+		
+		// Create dateString using local date components to avoid timezone shift
+		const year = date.getFullYear();
+		const month = String(date.getMonth() + 1).padStart(2, '0');
+		const day = String(date.getDate()).padStart(2, '0');
+		const dateString = `${year}-${month}-${day}`;
+		
 		days.push({
 			date: date,
-			dateString: date.toISOString().split('T')[0],
+			dateString: dateString,
 			displayDate: date.toLocaleDateString('en-US', { 
 				weekday: 'short', 
 				month: 'short', 
@@ -1015,44 +1023,48 @@ const MonthlyMenu = ({ data, openItemModal, addToCart, isCustomer }) => {
 
 // Monthly Menu Item Component
 const MonthlyMenuItem = ({ item, openItemModal, addToCart, isCustomer, canOrder }) => {
-	return (
-		<div className="flex gap-3 border border-stone-100 rounded-lg p-3 hover:shadow-sm transition cursor-pointer" onClick={openItemModal}>
-			<img
-				src={item.imageUrl || FALLBACK_IMAGE}
-				alt={item.name}
-				className="w-16 h-16 object-cover rounded flex-shrink-0"
-				onError={(e) => { e.currentTarget.src = FALLBACK_IMAGE; }}
-			/>
-			<div className="flex-1 min-w-0">
-				<div className="font-medium text-sm truncate">{item.name}</div>
-				<div className="text-xs text-stone-500 line-clamp-1">{item.description}</div>
-				<div className="flex items-center justify-between mt-1">
-					<span className="text-sm font-bold text-violet-700">{item.price} ৳</span>
-					{isCustomer && (
-						<button
-							onClick={(e) => {
-								e.stopPropagation();
-								if (canOrder) {
-									addToCart(item);
-								} else {
-									const deadline = ORDER_DEADLINES[item.mealType];
-									alert(`${item.mealType.charAt(0).toUpperCase() + item.mealType.slice(1)} ordering is closed for today after ${deadline.label}. You can order for future dates.`);
-								}
-							}}
-							className={`px-2 py-1 rounded text-xs font-semibold transition ${
-								canOrder 
-									? 'bg-violet-100 text-violet-700 hover:bg-violet-200' 
-									: 'bg-gray-100 text-gray-400 cursor-not-allowed'
-							}`}
-							disabled={!canOrder}
-						>
-							{canOrder ? 'Add' : 'Closed'}
-						</button>
-					)}
-				</div>
-			</div>
-		</div>
-	);
+    return (
+        <div 
+            className={`flex gap-3 border border-stone-100 rounded-lg p-3 transition ${
+                canOrder 
+                    ? 'hover:shadow-sm cursor-pointer' 
+                    : 'opacity-50 cursor-not-allowed bg-gray-50'
+            }`}
+            onClick={canOrder ? openItemModal : undefined}
+        >
+            <img
+                src={item.imageUrl || FALLBACK_IMAGE}
+                alt={item.name}
+                className="w-16 h-16 object-cover rounded flex-shrink-0"
+                onError={(e) => { e.currentTarget.src = FALLBACK_IMAGE; }}
+            />
+            <div className="flex-1 min-w-0">
+                <div className="font-medium text-sm truncate">{item.name}</div>
+                <div className="text-xs text-stone-500 line-clamp-1">{item.description}</div>
+                <div className="flex items-center justify-between mt-1">
+                    <span className="text-sm font-bold text-violet-700">{item.price} ৳</span>
+                    {isCustomer && (
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                if (canOrder) {
+                                    addToCart(item);
+                                }
+                            }}
+                            className={`px-2 py-1 rounded text-xs font-semibold transition ${
+                                canOrder 
+                                    ? 'bg-violet-100 text-violet-700 hover:bg-violet-200' 
+                                    : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                            }`}
+                            disabled={!canOrder}
+                        >
+                            {canOrder ? 'Add' : 'Closed'}
+                        </button>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
 };
 
 // Menu Item Card Component
@@ -1248,6 +1260,7 @@ const ItemModal = ({ item, isCustomer, addToCart, closeModal }) => {
 		</div>
 	);
 };
+
 
 
 
