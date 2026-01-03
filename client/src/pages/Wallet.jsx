@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axiosInstance from '../api/axios';
+import { loadStripe } from '@stripe/stripe-js';
 
 export default function Wallet() {
   const navigate = useNavigate();
@@ -48,19 +49,40 @@ export default function Wallet() {
     }
   };
 
-  const handleRecharge = async (e) => {
+ const handleRecharge = async (e) => {
     e.preventDefault();
     const amount = Number(rechargeAmount);
-    if (!amount || amount <= 0) return;
+    if (!amount || amount <= 0) {
+      alert("Please enter a valid amount");
+      return;
+    }
 
     try {
-      await axiosInstance.post("/api/wallet/recharge", { amount, method: "card" });
-      setRechargeAmount("");
-      await loadWallet();
-      alert("Wallet recharged successfully");
+      // 1. Save amount for later (to verify on success page)
+      localStorage.setItem("pendingRecharge", amount);
+
+      // 2. Get the session from your backend
+      // We no longer need loadStripe() here because we are redirecting via URL
+      const { data } = await axiosInstance.post("/api/payments/create-checkout-session", {
+        amount: amount
+      });
+
+      // 3. Redirect using the URL provided by Stripe/Backend
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        // Fallback in case your backend only sends the ID
+        console.error("Backend did not return a checkout URL. Check your payment controller.");
+        alert("Server error: No checkout URL received.");
+      }
     } catch (err) {
       console.error("Recharge failed", err);
-      alert("Failed to recharge wallet");
+      
+      // Detailed error reporting so we know WHY it failed
+      const errorMessage = err.response?.data?.message || err.response?.data?.error || err.message;
+      const statusCode = err.response?.status;
+      
+      alert(`Error ${statusCode || ''}: ${errorMessage}`);
     }
   };
 
