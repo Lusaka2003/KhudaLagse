@@ -15,8 +15,9 @@ import deliveryRoutes from "./routes/deliveryRoutes.js";
 import adminRoutes from "./routes/adminRoutes.js";
 import referralRoutes from "./routes/referralRoutes.js";
 import subscriptionRoutes from "./routes/subscriptionRoutes.js";
-import uploadRoutes from "./routes/uploadRoutes.js"; // ADD THIS
+import uploadRoutes from "./routes/uploadRoutes.js";
 import { User } from "./models/User.js";
+import paymentRoutes from './routes/paymentRoutes.js';
 
 // Get the directory name of the current module
 const __filename = fileURLToPath(import.meta.url);
@@ -58,7 +59,8 @@ app.use("/api/deliveries", deliveryRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/referrals", referralRoutes);
 app.use("/api/subscriptions", subscriptionRoutes);
-app.use("/api/upload", uploadRoutes); // ADD THIS
+app.use("/api/upload", uploadRoutes);
+app.use('/api/payments', paymentRoutes);
 
 // Error handler middleware (must be last)
 app.use(errorHandler);
