@@ -555,22 +555,27 @@ const EditProfileModal = ({ user, onClose, onUpdate }) => {
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-stone-500 mb-1.5 ml-1">
-                  City
-                </label>
-                <input
-                  type="text"
-                  className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-3 text-stone-800 font-medium focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 outline-none transition"
-                  value={formData.address.city}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      address: { ...formData.address, city: e.target.value },
-                    })
-                  }
-                  placeholder="e.g., Dhaka"
-                />
-              </div>
+            <label className="block text-xs font-medium text-stone-500 mb-1.5 ml-1">
+              City
+            </label>
+            <select
+              className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-3 text-stone-800 font-medium focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 outline-none transition"
+              value={formData.address.city}
+              onChange={(e) =>
+                setFormData({
+                  ...formData,
+                  address: { ...formData.address, city: e.target.value },
+                })
+              }
+            >
+              <option value="" disabled>
+                Select a city
+              </option>
+              <option value="Dhaka">Dhaka</option>
+              <option value="Chattogram">Chattogram</option>
+              <option value="Sylhet">Sylhet</option>
+            </select>
+          </div>
             </div>
           </div>
           
@@ -806,4 +811,5 @@ const ProfileItem = ({ label, value }) => (
     </span>
   </div>
 );
+
 
