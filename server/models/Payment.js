@@ -22,7 +22,7 @@ const PaymentSchema = new Schema(
     },
     method: {
       type: String,
-      enum: ["wallet", "card", "local_app"],
+      enum: ["wallet", "card", "local_app", "stripe"],
       required: true,
     },
     status: {
