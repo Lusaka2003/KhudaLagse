@@ -1,12 +1,10 @@
 import { User } from "../models/User.js";
 import Payment from "../models/Payment.js";
 
-/**
- * Get current user's wallet balance and recent transactions
- */
 export const getWallet = async (req, res) => {
   try {
-    const userId = req.user.id;
+    // FIX: Using _id instead of id
+    const userId = req.user._id || req.user.id;
 
     const user = await User.findById(userId).select("walletBalance");
     if (!user) {
@@ -27,19 +25,13 @@ export const getWallet = async (req, res) => {
   }
 };
 
-/**
- * Recharge wallet
- * For now this simulates a successful payment and updates wallet balance.
- */
 export const rechargeWallet = async (req, res) => {
   try {
-    const userId = req.user.id;
-    const { amount, method = "card" } = req.body;
+    const userId = req.user._id || req.user.id;
+    const { amount, method } = req.body; // Removed default "card" here to see what frontend sends
 
     if (!amount || amount <= 0) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Amount must be greater than zero" });
+      return res.status(400).json({ success: false, message: "Invalid amount" });
     }
 
     const user = await User.findById(userId);
@@ -47,15 +39,15 @@ export const rechargeWallet = async (req, res) => {
       return res.status(404).json({ success: false, message: "User not found" });
     }
 
-    // Simulate successful recharge
-    user.walletBalance = (user.walletBalance || 0) + amount;
+    user.walletBalance = (user.walletBalance || 0) + Number(amount);
     await user.save();
 
+    // The method MUST be one of: "wallet", "card", "local_app", or "stripe"
     const payment = await Payment.create({
       user: userId,
-      amount,
+      amount: Number(amount),
       type: "wallet_recharge",
-      method,
+      method: method || "card", // Fallback to card if stripe isn't passed
       status: "success",
     });
 
@@ -66,25 +58,18 @@ export const rechargeWallet = async (req, res) => {
       payment,
     });
   } catch (error) {
+    console.error("Recharge Error:", error);
+    // This will now tell you if it's a Validation Error (like the enum issue)
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-/**
- * List all payments for the current user (transaction management)
- */
 export const getMyPayments = async (req, res) => {
   try {
-    const userId = req.user.id;
-
-    const payments = await Payment.find({ user: userId }).sort({
-      createdAt: -1,
-    });
-
+    const userId = req.user._id || req.user.id;
+    const payments = await Payment.find({ user: userId }).sort({ createdAt: -1 });
     res.status(200).json({ success: true, payments });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 };
-
-
