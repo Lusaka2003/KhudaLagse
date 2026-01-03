@@ -27,6 +27,8 @@ import ReviewSection from './pages/ReviewSection';
 import ViewReview from './pages/ViewReview';
 import Wallet from './pages/Wallet';
 import ReferralRewards from './pages/ReferralRewards';
+import Success from './pages/Success';
+import Cancel from './pages/Cancel';
 
 // Admin Layout and Pages
 import AdminLayout from './components/AdminLayout';
@@ -89,6 +91,8 @@ function App() {
           <Route path="/delivery-staff/my-deliveries" element={<DeliveryStaffDeliveries />} />
           <Route path="/wallet" element={<Wallet />} />
           <Route path="/referrals" element={<ReferralRewards />} />
+          <Route path="/success" element={<Success />} />
+          <Route path="/cancel" element={<Cancel />} />
         </Routes>
       </div>
     </Router>
