@@ -42,7 +42,7 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Serve uploaded files statically - ADD THIS
+// Serve uploaded files statically
 app.use('/uploads', express.static(join(__dirname, 'uploads')));
 
 // Routes
@@ -60,69 +60,71 @@ app.use("/api/admin", adminRoutes);
 app.use("/api/referrals", referralRoutes);
 app.use("/api/subscriptions", subscriptionRoutes);
 app.use("/api/upload", uploadRoutes);
-app.use('/api/payments', paymentRoutes);
+
+// --- FIX IS HERE: Changed 'payments' to 'payment' to match Frontend ---
+app.use('/api/payment', paymentRoutes); 
 
 // Error handler middleware (must be last)
 app.use(errorHandler);
 
 const ensureSuperAdmin = async () => {
-	const email = process.env.SUPER_ADMIN_EMAIL;
-	const password = process.env.SUPER_ADMIN_PASSWORD;
-	if (!email || !password) return;
+  const email = process.env.SUPER_ADMIN_EMAIL;
+  const password = process.env.SUPER_ADMIN_PASSWORD;
+  if (!email || !password) return;
 
-	const name = process.env.SUPER_ADMIN_NAME || 'Super Admin';
-	const phone = process.env.SUPER_ADMIN_PHONE || '0000000000';
+  const name = process.env.SUPER_ADMIN_NAME || 'Super Admin';
+  const phone = process.env.SUPER_ADMIN_PHONE || '0000000000';
 
-	let admin = await User.findOne({ email }).select('+password');
+  let admin = await User.findOne({ email }).select('+password');
 
-	if (!admin) {
-		admin = await User.create({
-			name,
-			email,
-			phone,
-			password,
-			role: 'admin',
-			isSuperAdmin: true,
-			isActive: true,
-		});
-		return;
-	}
+  if (!admin) {
+    admin = await User.create({
+      name,
+      email,
+      phone,
+      password,
+      role: 'admin',
+      isSuperAdmin: true,
+      isActive: true,
+    });
+    return;
+  }
 
-	let saveNeeded = false;
-	if (admin.role !== 'admin') {
-		admin.role = 'admin';
-		saveNeeded = true;
-	}
-	if (admin.isSuperAdmin !== true) {
-		admin.isSuperAdmin = true;
-		saveNeeded = true;
-	}
-	if (admin.isActive === false) {
-		admin.isActive = true;
-		saveNeeded = true;
-	}
-	if (admin.name !== name) {
-		admin.name = name;
-		saveNeeded = true;
-	}
-	if (admin.phone !== phone) {
-		admin.phone = phone;
-		saveNeeded = true;
-	}
+  let saveNeeded = false;
+  if (admin.role !== 'admin') {
+    admin.role = 'admin';
+    saveNeeded = true;
+  }
+  if (admin.isSuperAdmin !== true) {
+    admin.isSuperAdmin = true;
+    saveNeeded = true;
+  }
+  if (admin.isActive === false) {
+    admin.isActive = true;
+    saveNeeded = true;
+  }
+  if (admin.name !== name) {
+    admin.name = name;
+    saveNeeded = true;
+  }
+  if (admin.phone !== phone) {
+    admin.phone = phone;
+    saveNeeded = true;
+  }
 
-	const matches = await admin.comparePassword(password);
-	if (!matches) {
-		admin.password = password;
-		saveNeeded = true;
-	}
+  const matches = await admin.comparePassword(password);
+  if (!matches) {
+    admin.password = password;
+    saveNeeded = true;
+  }
 
-	if (saveNeeded) {
-		await admin.save();
-	}
+  if (saveNeeded) {
+    await admin.save();
+  }
 };
 
 connectDB().then(async () => {
-	await ensureSuperAdmin();
+  await ensureSuperAdmin();
     app.listen(PORT, () => {
         console.log(`Server listening on port ${PORT}`);
     });
