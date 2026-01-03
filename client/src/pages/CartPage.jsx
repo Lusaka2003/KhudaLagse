@@ -19,7 +19,7 @@ const CartPage = () => {
   const [walletLoading, setWalletLoading] = useState(true);
   const [selectedAddress, setSelectedAddress] = useState(null);
 
-  // Check user role and redirect if not customer
+  // Check user role and redirect
   useEffect(() => {
     const userData = localStorage.getItem("user");
     if (userData) {
@@ -68,191 +68,95 @@ const CartPage = () => {
     );
   };
 
-  // Update delivery hour
   const toggleDeliveryHour = (index) => {
     setCart((prev) =>
       prev.map((item, i) => {
         if (i !== index) return item;
-
-        // Default hour if undefined
-        const currentHour =
-          item.deliveryHour ?? (item.mealType === "lunch" ? 13 : 20);
-
-        // Toggle lunch: 13 <-> 14, dinner: 20 <-> 21
+        const currentHour = item.deliveryHour ?? (item.mealType === "lunch" ? 13 : 20);
         const newHour =
           item.mealType === "lunch"
-            ? currentHour === 13
-              ? 14
-              : 13
-            : currentHour === 20
-            ? 21
-            : 20;
-
+            ? currentHour === 13 ? 14 : 13
+            : currentHour === 20 ? 21 : 20;
         return { ...item, deliveryHour: newHour };
       })
     );
   };
 
-  // Calculate subtotal (items only)
-  const subtotal = cart.reduce(
-    (sum, item) => sum + (item.price || 0) * (item.quantity || 1),
-    0
-  );
-
-  // Calculate total with delivery fee
+  const subtotal = cart.reduce((sum, item) => sum + (item.price || 0) * (item.quantity || 1), 0);
   const totalPrice = subtotal + DELIVERY_FEE;
 
-  const handleCheckout = async () => {
+  // --- NEW STRIPE CHECKOUT LOGIC ---
+  // --- UPDATED STRIPE CHECKOUT LOGIC WITH REAL ERRORS ---
+  const handleStripeCheckout = async () => {
     if (cart.length === 0) return;
-
-    const user = JSON.parse(localStorage.getItem("user"));
-    if (!user || user.role !== "customer") {
-      alert("You must be logged in as a customer to place an order.");
-      return;
-    }
-
-    // Validate delivery address
     if (!selectedAddress) {
-      alert("Please select a delivery address before checkout.");
+      alert("Please select a delivery address before checkout. 📍");
       return;
     }
-
-    // Validate wallet balance (check against total including delivery fee)
-    if (walletBalance !== null && walletBalance < totalPrice) {
-      const insufficient = totalPrice - walletBalance;
-      alert(
-        `Insufficient wallet balance. You need ${insufficient.toFixed(
-          2
-        )} BDT more.\n` +
-          `Current balance: ${walletBalance.toFixed(2)} BDT\n` +
-          `Subtotal: ${subtotal.toFixed(2)} BDT\n` +
-          `Delivery Fee: ${DELIVERY_FEE.toFixed(2)} BDT\n` +
-          `Total: ${totalPrice.toFixed(2)} BDT\n\n` +
-          `Please recharge your wallet from the dashboard.`
-      );
-      return;
-    }
-
-    if (!window.confirm(`Place order for ${totalPrice} BDT? (Includes ${DELIVERY_FEE} BDT delivery fee)`)) return;
 
     try {
       setLoading(true);
+      const { data } = await axiosInstance.post("/api/payment/create-checkout-session", {
+        items: cart,
+        address: selectedAddress,
+        deliveryFee: DELIVERY_FEE,
+        type: "cart_checkout" 
+      });
 
-      const orderPromises = [];
-      const errors = [];
+      if (data.url) {
+        window.location.href = data.url; 
+      }
+    } catch (err) {
+      // THIS PART IS CHANGED:
+      console.error("Full Error Object:", err);
+      
+      // This looks for the message the server sent back
+      const errorMessage = err.response?.data?.message || err.message || "Unknown error occurred";
+      
+      alert(`Stripe Error: ${errorMessage}`); 
+    } finally {
+      setLoading(false);
+    }
+  };
 
-      for (const item of cart) {
-        // Validate required fields
-        if (!item._id) {
-          errors.push(`Item "${item.name || "Unknown"}" is missing ID`);
-          continue;
-        }
+  // --- ORIGINAL WALLET CHECKOUT LOGIC ---
+  const handleWalletCheckout = async () => {
+    if (cart.length === 0 || !selectedAddress) {
+      alert("Please check your cart and address! 🎀");
+      return;
+    }
 
-        const restaurantId = item.restaurant || item.restaurantId;
-        if (!restaurantId) {
-          errors.push(
-            `Item "${item.name || "Unknown"}" is missing restaurant ID`
-          );
-          continue;
-        }
+    if (walletBalance < totalPrice) {
+      alert("Insufficient wallet balance! Please use Card or Recharge.");
+      return;
+    }
 
-        if (!item.price && item.price !== 0) {
-          errors.push(`Item "${item.name || "Unknown"}" is missing price`);
-          continue;
-        }
+    if (!window.confirm(`Place order for ${totalPrice} BDT using Wallet?`)) return;
 
-        // Get date - support both 'date' and 'deliveryDate' for backward compatibility
-        const itemDate = item.date || item.deliveryDate;
-        if (!itemDate) {
-          errors.push(
-            `Item "${item.name || "Unknown"}" is missing delivery date`
-          );
-          continue;
-        }
+    try {
+      setLoading(true);
+      const orderPromises = cart.map(item => {
+        const deliveryDateTime = new Date(item.date || item.deliveryDate);
+        deliveryDateTime.setHours(item.deliveryHour ?? (item.mealType === "lunch" ? 13 : 20), 0, 0, 0);
 
-        // Fixed date + selected delivery hour
-        const deliveryDateTime = new Date(itemDate);
-        if (isNaN(deliveryDateTime.getTime())) {
-          errors.push(`Item "${item.name || "Unknown"}" has invalid date`);
-          continue;
-        }
-
-        deliveryDateTime.setHours(
-          item.deliveryHour ?? (item.mealType === "lunch" ? 13 : 20),
-          0,
-          0,
-          0
-        );
-
-        const orderData = {
-          restaurantId,
-          items: [
-            {
-              itemId: item._id,
-              quantity: item.quantity || 1,
-              price: item.price,
-              mealType: item.mealType || "lunch",
-              day: item.day || null,
-            },
-          ],
-          total: (item.price || 0) * (item.quantity || 1) + DELIVERY_FEE, // Include delivery fee in total
+        return axiosInstance.post("/api/orders", {
+          restaurantId: item.restaurant || item.restaurantId,
+          items: [{ itemId: item._id, quantity: item.quantity || 1, price: item.price, mealType: item.mealType || "lunch" }],
+          total: (item.price * (item.quantity || 1)) + DELIVERY_FEE,
           deliveryDateTime: deliveryDateTime.toISOString(),
           paymentMethod: "wallet",
           deliveryAddress: selectedAddress,
-          deliveryFee: DELIVERY_FEE, // Add delivery fee to order data
-        };
+          deliveryFee: DELIVERY_FEE,
+        });
+      });
 
-        orderPromises.push(
-          axiosInstance.post("/api/orders", orderData).catch((err) => {
-            errors.push(
-              `Failed to order "${item.name || "Unknown"}": ${
-                err.response?.data?.message || err.message
-              }`
-            );
-            throw err;
-          })
-        );
-      }
-
-      if (errors.length > 0 && orderPromises.length === 0) {
-        alert(`Cannot place orders:\n${errors.join("\n")}`);
-        return;
-      }
-
-      // Execute all orders
-      const results = await Promise.allSettled(orderPromises);
-
-      const successful = results.filter((r) => r.status === "fulfilled").length;
-      const failed = results.filter((r) => r.status === "rejected").length;
-
-      // Refresh wallet balance after checkout
-      const { data } = await axiosInstance.get("/api/wallet");
-      setWalletBalance(data.walletBalance || 0);
-
-      if (successful > 0) {
-        if (failed > 0) {
-          const errorMessages =
-            errors.length > 0 ? errors.join("\n") : "Some orders failed";
-          alert(
-            `${successful} order(s) placed successfully. ${failed} order(s) failed.\n\n${errorMessages}`
-          );
-        } else {
-          alert(`${successful} order(s) placed successfully! (Including ${DELIVERY_FEE} BDT delivery fee per order)`);
-          clearCart();
-          // Notify other components
-          window.dispatchEvent(new Event("cartUpdated"));
-        }
-      } else {
-        const errorMessages =
-          errors.length > 0 ? errors.join("\n") : "All orders failed";
-        alert(`Failed to place orders:\n\n${errorMessages}`);
-      }
+      await Promise.all(orderPromises);
+      alert("Orders placed successfully! 🎉");
+      clearCart();
+      window.dispatchEvent(new Event("cartUpdated"));
     } catch (err) {
-      console.error("Checkout failed:", err.response?.data || err);
-      const errorMsg =
-        err.response?.data?.message ||
-        "Failed to place one or more orders. Please try again.";
-      alert(errorMsg);
+      console.error("Wallet Checkout failed:", err);
+      alert("One or more orders failed. Check console.");
     } finally {
       setLoading(false);
     }
@@ -261,187 +165,81 @@ const CartPage = () => {
   if (cart.length === 0) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 p-4 pt-24">
-        <h2 className="text-3xl font-bold text-gray-900 mb-4">
-          Your Cart is Empty
-        </h2>
-        <p className="text-gray-600">Add some delicious meals to your cart!</p>
+        <h2 className="text-3xl font-bold text-gray-900 mb-4">Your Cart is Empty 🎀</h2>
+        <button onClick={() => navigate('/')} className="text-violet-600 underline">Back to Shopping</button>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 pt-24 px-4">
+    <div className="min-h-screen bg-gray-50 pt-24 px-4 pb-12">
       <div className="max-w-4xl mx-auto bg-white rounded-xl shadow-md p-6">
         <h2 className="text-3xl font-bold text-gray-900 mb-6">Your Cart</h2>
 
-        {/* Delivery Address Selector */}
+        {/* Address Section */}
         <div className="mb-8 pb-6 border-b">
-          <h3 className="text-lg font-semibold text-gray-900 mb-3">
-            Delivery Address
-          </h3>
-          <MapAddressSelector
-            onAddressSelect={setSelectedAddress}
-            initialAddress={selectedAddress}
-          />
+          <h3 className="text-lg font-semibold text-gray-900 mb-3 font-display">Delivery Address</h3>
+          <MapAddressSelector onAddressSelect={setSelectedAddress} initialAddress={selectedAddress} />
         </div>
 
+        {/* Items Section */}
         <div className="space-y-4">
-          {cart.map((item, index) => {
-            const hour =
-              item.deliveryHour ?? (item.mealType === "lunch" ? 13 : 20);
-            const formattedTime = `${hour}:00`;
-
-            return (
-              <div
-                key={index}
-                className="flex flex-col md:flex-row items-center justify-between border-b pb-4 gap-4"
-              >
-                <div className="flex items-center gap-4">
-                  <img
-                    src={item.imageUrl || FALLBACK_IMAGE}
-                    alt={item.name}
-                    className="w-24 h-20 object-cover rounded-lg"
-                  />
-                  <div className="flex flex-col">
-                    <h3 className="font-semibold text-gray-900">{item.name}</h3>
-                    <p className="text-gray-600 text-sm">{item.description}</p>
-
-                    <p className="text-gray-500 text-sm mt-1">
-                      <span className="font-medium">Day:</span>{" "}
-                      {item.day || "N/A"} &nbsp;|&nbsp;
-                      <span className="font-medium">Date:</span>{" "}
-                      {item.date
-                        ? new Date(item.date).toLocaleDateString()
-                        : "N/A"}{" "}
-                      &nbsp;|&nbsp;
-                      <span className="font-medium">Meal Type:</span>{" "}
-                      {item.mealType || "N/A"}
-                    </p>
-
-                    <div className="text-gray-500 text-sm mt-1 flex items-center gap-2">
-                      <span className="font-medium">Delivery Time:</span>
-                      <button
-                        onClick={() => toggleDeliveryHour(index)}
-                        className="px-2 py-1 bg-gray-200 rounded hover:bg-gray-300"
-                      >
-                        {formattedTime}
-                      </button>
-                      <span className="text-xs text-gray-400">
-                        (click to toggle)
-                      </span>
-                    </div>
-
-                    <div className="mt-2 flex items-center gap-2">
-                      <button
-                        onClick={() =>
-                          updateQuantity(index, (item.quantity || 1) - 1)
-                        }
-                        className="bg-gray-200 px-2 py-1 rounded hover:bg-gray-300"
-                      >
-                        -
-                      </button>
-                      <span className="px-2">{item.quantity || 1}</span>
-                      <button
-                        onClick={() =>
-                          updateQuantity(index, (item.quantity || 1) + 1)
-                        }
-                        className="bg-gray-200 px-2 py-1 rounded hover:bg-gray-300"
-                      >
-                        +
-                      </button>
-                    </div>
+          {cart.map((item, index) => (
+            <div key={index} className="flex flex-col md:flex-row items-center justify-between border-b pb-4 gap-4">
+              <div className="flex items-center gap-4">
+                <img src={item.imageUrl || FALLBACK_IMAGE} alt={item.name} className="w-24 h-20 object-cover rounded-lg" />
+                <div>
+                  <h3 className="font-semibold text-gray-900">{item.name}</h3>
+                  <p className="text-gray-500 text-sm">Delivery: {new Date(item.date).toLocaleDateString()} at {item.deliveryHour ?? (item.mealType === 'lunch' ? 13 : 20)}:00</p>
+                  <div className="mt-2 flex items-center gap-2">
+                    <button onClick={() => updateQuantity(index, (item.quantity || 1) - 1)} className="bg-gray-100 px-2 rounded">-</button>
+                    <span>{item.quantity || 1}</span>
+                    <button onClick={() => updateQuantity(index, (item.quantity || 1) + 1)} className="bg-gray-100 px-2 rounded">+</button>
                   </div>
                 </div>
-                <div className="flex flex-col items-end">
-                  <p className="text-lg font-bold text-violet-700">
-                    {(item.price || 0) * (item.quantity || 1)} BDT
-                  </p>
-                  <button
-                    onClick={() => removeItem(index)}
-                    className="text-red-500 text-sm mt-1 hover:underline"
-                  >
-                    Remove
-                  </button>
-                </div>
               </div>
-            );
-          })}
+              <p className="text-lg font-bold text-violet-700">{(item.price || 0) * (item.quantity || 1)} BDT</p>
+            </div>
+          ))}
         </div>
 
-        <div className="mt-6 space-y-4">
-          {/* Price Breakdown */}
-          <div className="bg-gray-50 rounded-lg p-4 border">
-            <div className="space-y-2">
-              <div className="flex justify-between items-center">
-                <span className="text-gray-700">Subtotal:</span>
-                <span className="font-medium">{subtotal.toFixed(2)} BDT</span>
-              </div>
-              <div className="flex justify-between items-center border-t pt-2">
-                <span className="text-gray-700">Delivery Fee:</span>
-                <span className="font-medium">{DELIVERY_FEE.toFixed(2)} BDT</span>
-              </div>
-              <div className="flex justify-between items-center border-t pt-2">
-                <span className="text-gray-700 font-bold">Total:</span>
-                <span className="text-lg font-bold text-violet-700">{totalPrice.toFixed(2)} BDT</span>
-              </div>
-            </div>
+        {/* Checkout Summary */}
+        <div className="mt-6 p-4 bg-gray-50 rounded-lg border">
+          <div className="flex justify-between mb-2"><span>Subtotal</span><span>{subtotal.toFixed(2)} BDT</span></div>
+          <div className="flex justify-between mb-2"><span>Delivery Fee</span><span>{DELIVERY_FEE.toFixed(2)} BDT</span></div>
+          <div className="flex justify-between text-xl font-bold text-gray-900 border-t pt-2">
+            <span>Total</span><span>{totalPrice.toFixed(2)} BDT</span>
           </div>
+        </div>
 
-          {/* Wallet Balance Display */}
-          {!walletLoading && (
-            <div className="bg-gray-50 rounded-lg p-4 border">
-              <div className="flex justify-between items-center">
-                <span className="text-gray-700 font-medium">
-                  Wallet Balance:
-                </span>
-                <span
-                  className={`text-lg font-bold ${
-                    walletBalance >= totalPrice
-                      ? "text-green-600"
-                      : "text-red-600"
-                  }`}
-                >
-                  {walletBalance.toFixed(2)} BDT
-                </span>
-              </div>
-              {walletBalance < totalPrice && (
-                <p className="text-sm text-red-600 mt-2">
-                  ⚠️ Insufficient balance. You need{" "}
-                  {(totalPrice - walletBalance).toFixed(2)} BDT more.
-                </p>
-              )}
-            </div>
-          )}
-
-          <div className="flex flex-col md:flex-row justify-between items-center gap-4">
+        {/* Action Buttons */}
+        <div className="mt-8 flex flex-col md:flex-row gap-4 items-center justify-between">
+          <button onClick={clearCart} className="text-red-500 font-semibold hover:underline">Clear Cart</button>
+          
+          <div className="flex flex-wrap gap-3">
             <button
-              onClick={clearCart}
-              className="bg-red-500 text-white px-4 py-2 rounded-lg hover:bg-red-600 transition font-semibold"
+              onClick={handleWalletCheckout}
+              disabled={loading || walletBalance < totalPrice}
+              className="bg-violet-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-violet-700 transition disabled:opacity-50"
             >
-              Clear Cart
+              {loading ? "Placing..." : "Pay with Wallet"}
             </button>
-            <div className="text-center">
-              <p className="text-lg font-bold text-gray-900">
-                Total with Delivery: {totalPrice.toFixed(2)} BDT
-              </p>
-              {walletBalance !== null && (
-                <p className="text-sm text-gray-600">
-                  After payment: {(walletBalance - totalPrice).toFixed(2)} BDT
-                </p>
-              )}
-            </div>
+
             <button
-              onClick={handleCheckout}
-              disabled={
-                loading ||
-                (walletBalance !== null && walletBalance < totalPrice)
-              }
-              className="bg-violet-600 text-white px-4 py-2 rounded-lg hover:bg-violet-700 transition font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={handleStripeCheckout}
+              disabled={loading}
+              className="bg-indigo-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-indigo-700 transition flex items-center gap-2"
             >
-              {loading ? "Placing Order..." : `Checkout (${totalPrice.toFixed(2)} BDT)`}
+              {loading ? "Redirecting..." : "Pay with Card 💳"}
             </button>
           </div>
         </div>
+
+        {walletBalance < totalPrice && (
+          <p className="text-center text-red-500 mt-4 text-sm font-medium italic">
+            * Insufficient wallet balance. Please use Card or recharge your wallet.
+          </p>
+        )}
       </div>
     </div>
   );

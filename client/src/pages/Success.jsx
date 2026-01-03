@@ -1,43 +1,61 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import axiosInstance from '../api/axios';
 
 const Success = () => {
   const navigate = useNavigate();
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const hasCalled = useRef(false);
+  const [searchParams] = useSearchParams();
+  const sessionId = searchParams.get("session_id");
+  
+  const [status, setStatus] = useState("loading"); // loading, success, error
+  const [type, setType] = useState(null); // 'cart_checkout' or 'wallet_recharge'
+  const [errorMessage, setErrorMessage] = useState(null);
+  
+  const hasVerified = useRef(false);
 
   useEffect(() => {
-    const finalizeRecharge = async () => {
-      if (hasCalled.current) return;
-      
-      const amount = localStorage.getItem("pendingRecharge");
-      
-      if (amount) {
-        hasCalled.current = true;
-        try {
-          await axiosInstance.post("/api/wallet/recharge", { 
-            amount: Number(amount),
-            method: "stripe" 
-          });
+    // If no session ID, redirect back to dashboard/customer
+    if (!sessionId) {
+      navigate('/dashboard/customer');
+      return;
+    }
+
+    if (hasVerified.current) return;
+    hasVerified.current = true;
+
+    const verifyPayment = async () => {
+      try {
+        const storedCart = JSON.parse(localStorage.getItem("cart") || "[]");
+
+        const { data } = await axiosInstance.post("/api/payment/success", { 
+          sessionId,
+          cartItems: storedCart 
+        });
+
+        if (data.success) {
+          setType(data.type); 
+          setStatus("success");
+
+          // Clean up cart if it was a food order
+          if (data.type === 'cart_checkout') {
+            localStorage.removeItem("cart");
+            window.dispatchEvent(new Event("cartUpdated")); 
+          }
           
-          setLoading(false);
+          // Clean up wallet recharge pending state
           localStorage.removeItem("pendingRecharge");
-        } catch (err) {
-          console.error("Payment sync error:", err);
-          setError(err.response?.data?.message || err.message);
-          setLoading(false);
         }
-      } else {
-        navigate('/wallet');
+      } catch (err) {
+        console.error("Verification error:", err);
+        setStatus("error");
+        setErrorMessage(err.response?.data?.message || err.message);
       }
     };
 
-    finalizeRecharge();
-  }, [navigate]);
+    verifyPayment();
+  }, [sessionId, navigate]);
 
-  // Main container styles
+  // --- STYLES ---
   const containerStyle = {
     display: 'flex',
     flexDirection: 'column',
@@ -46,12 +64,23 @@ const Success = () => {
     minHeight: '80vh',
     fontFamily: "'Inter', system-ui, sans-serif",
     padding: '20px',
-    textAlign: 'center'
+    textAlign: 'center',
+    backgroundColor: '#f9fafb'
+  };
+
+  const cardStyle = {
+    backgroundColor: 'white',
+    padding: '40px',
+    borderRadius: '24px',
+    boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
+    maxWidth: '500px',
+    width: '100%'
   };
 
   const buttonStyle = {
-    marginTop: '30px',
-    padding: '12px 32px',
+    marginTop: '24px',
+    width: '100%',
+    padding: '14px',
     backgroundColor: '#7c3aed',
     color: 'white',
     border: 'none',
@@ -59,50 +88,73 @@ const Success = () => {
     fontSize: '1rem',
     fontWeight: '600',
     cursor: 'pointer',
-    transition: 'transform 0.2s ease'
+    transition: 'all 0.2s ease',
+    boxShadow: '0 4px 6px -1px rgba(124, 58, 237, 0.3)'
   };
 
   return (
     <div style={containerStyle}>
-      {loading ? (
-        <div className="loader-container">
-          <h2 style={{ color: '#4b5563' }}>Updating your balance...</h2>
-          <p style={{ color: '#9ca3af' }}>Please don't close this page</p>
-        </div>
-      ) : error ? (
-        <div style={{ maxWidth: '400px' }}>
-          <div style={{ fontSize: '4rem', marginBottom: '20px' }}>⚠️</div>
-          <h1 style={{ color: '#1f2937', marginBottom: '10px' }}>Something went wrong</h1>
-          <p style={{ color: '#6b7280', lineHeight: '1.5' }}>
-            The payment was successful, but we couldn't update your wallet automatically. 
-            Don't worry, our team can help.
-          </p>
-          <p style={{ fontSize: '0.85rem', color: '#ef4444', marginTop: '15px', fontWeight: '500' }}>
-            Error: {error}
-          </p>
-          <button style={buttonStyle} onClick={() => navigate('/wallet')}>
-            Return to Wallet
-          </button>
-        </div>
-      ) : (
-        <div style={{ maxWidth: '450px' }}>
-          <div style={{ fontSize: '4.5rem', marginBottom: '20px' }}>✨</div>
-          <h1 style={{ color: '#111827', fontWeight: '800', fontSize: '2.25rem', marginBottom: '16px' }}>
-            Funds Added!
-          </h1>
-          <p style={{ color: '#4b5563', fontSize: '1.1rem', lineHeight: '1.6' }}>
-            Your recharge was successful. Your wallet balance has been updated and you're ready to order.
-          </p>
-          <button 
-            style={buttonStyle} 
-            onClick={() => navigate('/dashboard/customer')}
-            onMouseOver={(e) => e.target.style.opacity = '0.9'}
-            onMouseOut={(e) => e.target.style.opacity = '1'}
-          >
-            Back to Dashboard
-          </button>
-        </div>
-      )}
+      <div style={cardStyle}>
+        
+        {/* LOADING STATE */}
+        {status === 'loading' && (
+          <div className="loader-container">
+            <div style={{ fontSize: '3rem', marginBottom: '20px', animation: 'bounce 1s infinite' }}>⏳</div>
+            <h2 style={{ color: '#1f2937', fontSize: '1.5rem', fontWeight: 'bold' }}>Verifying Payment...</h2>
+            <p style={{ color: '#6b7280', marginTop: '8px' }}>Please wait while we secure your order.</p>
+          </div>
+        )}
+
+        {/* ERROR STATE */}
+        {status === 'error' && (
+          <div>
+            <div style={{ fontSize: '4rem', marginBottom: '20px' }}>⚠️</div>
+            <h1 style={{ color: '#1f2937', marginBottom: '10px', fontSize: '2rem', fontWeight: 'bold' }}>Something went wrong</h1>
+            <p style={{ color: '#6b7280', lineHeight: '1.5' }}>
+              We received your payment, but couldn't finalize the order automatically.
+            </p>
+            <p style={{ fontSize: '0.85rem', color: '#ef4444', marginTop: '15px', fontWeight: '500', padding: '10px', backgroundColor: '#fee2e2', borderRadius: '8px' }}>
+              Error: {errorMessage}
+            </p>
+            <button style={buttonStyle} onClick={() => navigate('/dashboard/customer')}>
+              Return to Dashboard
+            </button>
+          </div>
+        )}
+
+        {/* SUCCESS STATE */}
+        {status === 'success' && (
+          <div>
+            {/* DYNAMIC ICON */}
+            <div style={{ fontSize: '4.5rem', marginBottom: '24px' }}>
+              {type === 'cart_checkout' ? '🍔' : '✨'}
+            </div>
+
+            {/* DYNAMIC TITLE */}
+            <h1 style={{ color: '#111827', fontWeight: '800', fontSize: '2.25rem', marginBottom: '16px' }}>
+              {type === 'cart_checkout' ? 'Order Placed!' : 'Funds Added!'}
+            </h1>
+
+            {/* DYNAMIC MESSAGE */}
+            <p style={{ color: '#4b5563', fontSize: '1.1rem', lineHeight: '1.6' }}>
+              {type === 'cart_checkout' 
+                ? "Yum! Your food order has been confirmed and is being prepared." 
+                : "Your wallet recharge was successful. You are ready to spend!"}
+            </p>
+
+            {/* SINGLE BUTTON -> GO TO DASHBOARD */}
+            <button 
+              style={buttonStyle} 
+              onClick={() => navigate('/dashboard/customer')}
+              onMouseOver={(e) => e.target.style.opacity = '0.9'}
+              onMouseOut={(e) => e.target.style.opacity = '1'}
+            >
+              Go to Dashboard
+            </button>
+          </div>
+        )}
+
+      </div>
     </div>
   );
 };
